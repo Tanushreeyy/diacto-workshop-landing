@@ -25,9 +25,10 @@ export const BUTTON = { type: "URL", text: "📍 Get Directions", url: MAP_URL }
 
 const EX_NAME = "Priya";
 const EX_LINK = "https://diacto-workshop.example.com/?rid=abc123";
+const EX_PASS = "https://diacto-workshop.example.com/api/pass?rid=abc123";
 
 const V_BOOK = ["First name", "Booking link"];
-const V_NAME = ["First name"];
+const V_PASS = ["First name", "Event Pass link"];
 
 // name, category, variable labels, ordered example values, and body text.
 export const TEMPLATES = [
@@ -84,40 +85,43 @@ export const TEMPLATES = [
   {
     name: "wa_5_confirmation",
     category: "UTILITY",
-    labels: V_NAME,
-    example: [EX_NAME],
+    labels: V_PASS,
+    example: [EX_NAME, EX_PASS],
     body:
       "🎉 Congratulations {{1}}! Your seat for the High-Performance Teams Workshop is CONFIRMED.\n" +
       "🗓 Fri, 17 July  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune\n" +
-      "📩 Your Event Pass (PDF) is in your email — carry it (digital or print) for entry. Our team will call you shortly.\n" +
-      "Tap “Get Directions” below. See you there! 🚀",
+      "📎 Your Event Pass: {{2}}\n" +
+      "Also emailed to you — carry it (digital or print) for entry. Tap “Get Directions” below. See you there! 🚀",
   },
   {
     name: "wa_6_day_before",
     category: "UTILITY",
-    labels: V_NAME,
-    example: [EX_NAME],
+    labels: V_PASS,
+    example: [EX_NAME, EX_PASS],
     body:
       "Hi {{1}}! Tomorrow at 3 PM — High-Performance Teams Workshop, Prabhavee Tech Park, Baner.\n" +
-      "Your Event Pass is in your email 📩. Check-in opens 2:30 PM. Tap “Get Directions” below. See you there! 🚀",
+      "📎 Your Event Pass: {{2}}\n" +
+      "Check-in opens 2:30 PM. Tap “Get Directions” below. See you there! 🚀",
   },
   {
     name: "wa_7_morning_of",
     category: "UTILITY",
-    labels: V_NAME,
-    example: [EX_NAME],
+    labels: V_PASS,
+    example: [EX_NAME, EX_PASS],
     body:
       "Good morning {{1}}! ☀️ The High-Performance Teams Workshop is today at 3 PM — doors open 2:30 PM, Prabhavee Tech Park, Baner.\n" +
-      "Carry your Event Pass (in your email 📩). Friday traffic in Baner — leave early! Tap “Get Directions” below. ✅",
+      "📎 Your Event Pass: {{2}}\n" +
+      "Friday traffic in Baner — leave early! Tap “Get Directions” below. ✅",
   },
   {
     name: "wa_8_two_hour",
     category: "UTILITY",
-    labels: V_NAME,
-    example: [EX_NAME],
+    labels: V_PASS,
+    example: [EX_NAME, EX_PASS],
     body:
       "Hi {{1}}, the High-Performance Teams Workshop goes live in 2 hours! ⏳ 3:00 PM sharp, Prabhavee Tech Park, Baner.\n" +
-      `Show your Event Pass at check-in. Need help? Call ${SUPPORT}. Tap “Get Directions” below. 🚀`,
+      "📎 Your Event Pass: {{2}}\n" +
+      `Show it at check-in. Need help? Call ${SUPPORT}. Tap “Get Directions” below. 🚀`,
   },
 ];
 

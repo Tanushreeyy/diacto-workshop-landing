@@ -7,13 +7,15 @@ Language      : English (en)
 
 ────────── BODY ──────────
 Good morning {{1}}! ☀️ The High-Performance Teams Workshop is today at 3 PM — doors open 2:30 PM, Prabhavee Tech Park, Baner.
-Carry your Event Pass (in your email 📩). Friday traffic in Baner — leave early! Tap “Get Directions” below. ✅
+📎 Your Event Pass: {{2}}
+Friday traffic in Baner — leave early! Tap “Get Directions” below. ✅
 
 ────────── FOOTER ──────────
 Diacto Technologies
 
 ────────── VARIABLES / SAMPLE VALUES ──────────
   {{1}} = First name           sample: Priya
+  {{2}} = Event Pass link      sample: https://diacto-workshop.example.com/api/pass?rid=abc123
 
 ────────── BUTTONS ──────────
 [URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

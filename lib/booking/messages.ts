@@ -38,13 +38,13 @@ export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: 
 
 // WhatsApp template body-variable maps. The venue map + support number are
 // STATIC (a static "Get Directions" URL button + hardcoded text in the template),
-// so the only body variables are {{1}} first name and — on WA-1..4 — {{2}}
-// booking link.
+// so the only body variables are the first name and a dynamic link:
 //   WA-1…WA-4 : {{1}} first name · {{2}} booking link
-//   WA-5…WA-8 : {{1}} first name
+//   WA-5…WA-8 : {{1}} first name · {{2}} Event Pass download link
 export function waParamsFor(templateName: string, ctx: MsgCtx): WaParam[] {
   const fn: WaParam = { name: "1", value: ctx.firstName };
   const bookingLink: WaParam = { name: "2", value: ctx.bookingLink };
+  const passLink: WaParam = { name: "2", value: ctx.passUrl ?? ctx.bookingLink };
 
   switch (templateName) {
     case WA_TEMPLATES.WA1:
@@ -53,6 +53,6 @@ export function waParamsFor(templateName: string, ctx: MsgCtx): WaParam[] {
     case WA_TEMPLATES.WA4:
       return [fn, bookingLink];
     default:
-      return [fn];
+      return [fn, passLink];
   }
 }

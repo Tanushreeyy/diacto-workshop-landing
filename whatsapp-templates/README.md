@@ -25,7 +25,7 @@ The `{{n}}` numbers **must** match what the code sends
 (`lib/booking/messages.ts` → `waParamsFor`):
 
 - **WA-1…WA-4:** `{{1}}` first name · `{{2}}` booking link
-- **WA-5…WA-8:** `{{1}}` first name
+- **WA-5…WA-8:** `{{1}}` first name · `{{2}}` Event Pass download link
 
 If you rename a template in WATI, set the matching `WATI_TPL_WA*` env var so the
 code sends the right name.
