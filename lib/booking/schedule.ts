@@ -31,28 +31,25 @@ export function isQuietHours(now: Date = new Date()): boolean {
   return h < 9 || h >= 22;
 }
 
-// The two daily nurture slots are 10:00 and 18:00 IST. Returns the active slot
-// (10 or 18) if the current hour is in one of them, else null. An hourly tick
-// therefore fires each lead at most twice a day.
-export function nurtureSlot(now: Date = new Date()): 10 | 18 | null {
-  const h = istParts(now).hour;
-  if (h === 10) return 10;
-  if (h === 18) return 18;
-  return null;
-}
+// Daily nurture slots (IST): 10:00 and 17:00. WA + email fire once per slot.
+const NURTURE_SLOTS = [10, 17];
 
-function hoursBetween(aIso: string, now: Date): number {
-  const t = Date.parse(aIso);
-  if (Number.isNaN(t)) return Infinity;
-  return (now.getTime() - t) / 3_600_000;
-}
-
-// A pending lead is due for a nudge when we're inside a slot and haven't nudged
-// in the last 5h (guards against two ticks inside the same slot hour).
+// A pending lead is due when the day has passed a nurture slot that its last
+// nudge predates. Robust to missed ticks (catches up the same day) and never
+// exceeds two touches per day.
 export function dueForNurture(lastNudgeAtIso: string, now: Date = new Date()): boolean {
-  if (nurtureSlot(now) === null) return false;
+  const np = istParts(now);
+  const passed = NURTURE_SLOTS.filter((s) => np.hour >= s);
+  if (passed.length === 0) return false; // before the first slot (10:00)
+  const currentSlot = Math.max(...passed); // 10 or 17
   if (!lastNudgeAtIso) return true;
-  return hoursBetween(lastNudgeAtIso, now) >= 5;
+  const lastMs = Date.parse(lastNudgeAtIso);
+  if (Number.isNaN(lastMs)) return true;
+  const lp = istParts(new Date(lastMs));
+  const sameDay =
+    lp.year === np.year && lp.month === np.month && lp.date === np.date;
+  if (!sameDay) return true; // last nudge on a prior day → due
+  return lp.hour < currentSlot; // due if the last nudge predates this slot
 }
 
 // Reminders that are past their scheduled time and not yet sent for this lead.

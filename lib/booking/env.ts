@@ -35,7 +35,4 @@ export const env = {
   // Plumbing
   cronSecret: () => req("CRON_SECRET"),
   landingBaseUrl: () => req("LANDING_BASE_URL").replace(/\/+$/, ""),
-
-  // Feature flags
-  enableWaReminders: () => opt("ENABLE_WA_REMINDERS", "false") === "true",
 };

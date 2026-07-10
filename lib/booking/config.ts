@@ -21,19 +21,19 @@ export const WA_TEMPLATES = {
   WA1: process.env.WATI_TPL_WA1 || "wa_1_booking_pending",
   WA2: process.env.WATI_TPL_WA2 || "wa_2_value_nudge",
   WA3: process.env.WATI_TPL_WA3 || "wa_3_problem_nudge",
-  WA4: process.env.WATI_TPL_WA4 || "wa_4_scarcity_nudge",
-  WA5: process.env.WATI_TPL_WA5 || "wa_5_final_nudge",
-  WA6: process.env.WATI_TPL_WA6 || "wa_6_confirmation",
-  WAR1: process.env.WATI_TPL_WAR1 || "wa_r1_morning",
-  WAR2: process.env.WATI_TPL_WAR2 || "wa_r2_two_hour",
+  WA4: process.env.WATI_TPL_WA4 || "wa_4_urgency_nudge",
+  WA5: process.env.WATI_TPL_WA5 || "wa_5_confirmation",
+  WA6: process.env.WATI_TPL_WA6 || "wa_6_day_before",
+  WA7: process.env.WATI_TPL_WA7 || "wa_7_morning_of",
+  WA8: process.env.WATI_TPL_WA8 || "wa_8_two_hour",
 } as const;
 
-// Ordered WhatsApp nurture ladder (advances one step per twice-daily touch).
+// Nurture ladder for pending leads: WA-2 (touch 1) → WA-3 (touch 2) →
+// WA-4 (repeats twice daily until booked).
 export const WA_NURTURE_LADDER = [
   WA_TEMPLATES.WA2,
   WA_TEMPLATES.WA3,
   WA_TEMPLATES.WA4,
-  WA_TEMPLATES.WA5, // WA5 repeats once the ladder is exhausted
 ] as const;
 
 export type ReminderKind = "email" | "wa";
@@ -45,15 +45,16 @@ export interface ReminderSpec {
   optional?: boolean; // WA reminders are gated behind ENABLE_WA_REMINDERS
 }
 
-// Absolute reminder times (UTC). Hardcoded from the IST schedule to avoid any
-// offset math errors:
-//   EM-2  16 Jul 10:00 IST = 2026-07-16T04:30:00Z
-//   EM-3  17 Jul 09:00 IST = 2026-07-17T03:30:00Z
-//   EM-4  17 Jul 13:00 IST = 2026-07-17T07:30:00Z
+// Post-booking reminders — email + WhatsApp fire together at each milestone.
+// Absolute UTC times, hardcoded from the IST schedule to avoid offset errors:
+//   Day before  16 Jul 10:00 IST = 04:30Z → EM-2 + WA-6
+//   Morning of  17 Jul 09:00 IST = 03:30Z → EM-3 + WA-7
+//   2h before   17 Jul 13:00 IST = 07:30Z → EM-4 + WA-8
 export const REMINDERS: ReminderSpec[] = [
   { key: "EM2", at: "2026-07-16T04:30:00Z", kind: "email" },
+  { key: "WA6", at: "2026-07-16T04:30:00Z", kind: "wa" },
   { key: "EM3", at: "2026-07-17T03:30:00Z", kind: "email" },
-  { key: "WAR1", at: "2026-07-17T03:30:00Z", kind: "wa", optional: true },
+  { key: "WA7", at: "2026-07-17T03:30:00Z", kind: "wa" },
   { key: "EM4", at: "2026-07-17T07:30:00Z", kind: "email" },
-  { key: "WAR2", at: "2026-07-17T07:30:00Z", kind: "wa", optional: true },
+  { key: "WA8", at: "2026-07-17T07:30:00Z", kind: "wa" },
 ];

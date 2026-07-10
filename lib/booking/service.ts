@@ -170,13 +170,13 @@ async function confirmRow(table: Table, row: SheetRow): Promise<{ regId: string;
     [C.passSent]: nowIso(),
   });
 
-  // WA-6 confirmation
+  // WA-5 confirmation
   if (phone) {
     try {
       await sendTemplate({
         whatsappNumber: phone,
-        templateName: WA_TEMPLATES.WA6,
-        parameters: waParamsFor(WA_TEMPLATES.WA6, ctx),
+        templateName: WA_TEMPLATES.WA5,
+        parameters: waParamsFor(WA_TEMPLATES.WA5, ctx),
       });
     } catch (e) {
       console.error(`[confirm] WA-6 failed for row ${row.rowNumber}:`, e);
@@ -242,10 +242,12 @@ async function remindLead(table: Table, row: SheetRow): Promise<number> {
           : undefined;
         if (email) await sendMail({ to: email, subject, html, attachments });
       } else if (r.kind === "wa") {
-        if (!env.enableWaReminders()) {
-          continue; // optional WA reminders disabled
-        }
-        const tpl = r.key === "WAR1" ? WA_TEMPLATES.WAR1 : WA_TEMPLATES.WAR2;
+        const tpl =
+          r.key === "WA6"
+            ? WA_TEMPLATES.WA6
+            : r.key === "WA7"
+              ? WA_TEMPLATES.WA7
+              : WA_TEMPLATES.WA8;
         if (phone) {
           await sendTemplate({
             whatsappNumber: phone,

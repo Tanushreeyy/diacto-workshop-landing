@@ -3,7 +3,7 @@
 // ordered {{1}},{{2}}… variable values. Email copy is condensed from the
 // client's template doc and can be edited freely without touching logic.
 
-import { WORKSHOP } from "./config";
+import { WORKSHOP, WA_TEMPLATES } from "./config";
 import type { WaParam } from "./wati";
 
 export interface MsgCtx {
@@ -137,18 +137,29 @@ export function emailFor(kind: EmailKind, ctx: MsgCtx): { subject: string; html:
 
 // WhatsApp template variable maps. These must line up with the {{1}},{{2}}…
 // placeholders in the corresponding approved WATI template.
+//   WA-1…WA-4 : {{1}} first name · {{2}} booking link · {{3}} location link
+//   WA-5/6/7  : {{1}} first name · {{2}} location link
+//   WA-8      : {{1}} first name · {{2}} location link · {{3}} support number
 export function waParamsFor(templateName: string, ctx: MsgCtx): WaParam[] {
   const fn: WaParam = { name: "1", value: ctx.firstName };
-  const link: WaParam = { name: "2", value: ctx.bookingLink };
-  const map: WaParam = { name: "2", value: ctx.mapUrl };
-  const support: WaParam = { name: "2", value: ctx.support };
-  const pass: WaParam = { name: "2", value: ctx.passUrl || ctx.mapUrl };
+  const bookingLink: WaParam = { name: "2", value: ctx.bookingLink };
+  const mapAt2: WaParam = { name: "2", value: ctx.mapUrl };
+  const mapAt3: WaParam = { name: "3", value: ctx.mapUrl };
+  const supportAt3: WaParam = { name: "3", value: ctx.support };
 
-  // WA-6 confirmation carries the pass-download link ({{2}}); reminders carry
-  // the map/support; nurture carries the booking link. Adjust here if a template
-  // uses a different variable order.
-  if (templateName.includes("_6_") || templateName.includes("confirmation")) return [fn, pass];
-  if (templateName.includes("_r1_") || templateName.includes("morning")) return [fn, map];
-  if (templateName.includes("_r2_") || templateName.includes("two_hour")) return [fn, support];
-  return [fn, link];
+  switch (templateName) {
+    case WA_TEMPLATES.WA1:
+    case WA_TEMPLATES.WA2:
+    case WA_TEMPLATES.WA3:
+    case WA_TEMPLATES.WA4:
+      return [fn, bookingLink, mapAt3];
+    case WA_TEMPLATES.WA5:
+    case WA_TEMPLATES.WA6:
+    case WA_TEMPLATES.WA7:
+      return [fn, mapAt2];
+    case WA_TEMPLATES.WA8:
+      return [fn, mapAt2, supportAt3];
+    default:
+      return [fn, bookingLink];
+  }
 }
