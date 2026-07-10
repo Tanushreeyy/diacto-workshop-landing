@@ -179,8 +179,8 @@ async function confirmRow(table: Table, row: SheetRow): Promise<{ regId: string;
         whatsappNumber: phone,
         templateName: WA_TEMPLATES.WA5,
         parameters: waParamsFor(WA_TEMPLATES.WA5, ctx),
-        document: ctx.passUrl
-          ? { url: ctx.passUrl, filename: `Event_Pass_${firstNameOf(name)}.pdf` }
+        headerDocument: ctx.passUrl
+          ? { paramName: env.watiDocParam(), url: ctx.passUrl }
           : undefined,
       });
     } catch (e) {

@@ -22,31 +22,29 @@ export async function sendTemplate(opts: {
   templateName: string;
   broadcastName?: string;
   parameters?: WaParam[];
-  // Per-recipient header media, for templates with a DOCUMENT header (WA-5).
-  document?: { url: string; filename: string };
+  // Dynamic document-header media (WA-5). WATI attaches header media by passing
+  // the public URL as a named parameter whose name matches the template's header
+  // variable (per WATI's "send images/PDFs via template" docs).
+  headerDocument?: { paramName: string; url: string };
 }): Promise<void> {
   const number = normalizeWhatsApp(opts.whatsappNumber);
   if (!number) throw new Error("WATI send: empty/invalid whatsapp number");
-  const url = `${env.watiEndpoint()}/api/v1/sendTemplateMessage?whatsappNumber=${encodeURIComponent(number)}`;
-  const body: Record<string, unknown> = {
-    template_name: opts.templateName,
-    broadcast_name: opts.broadcastName ?? `${opts.templateName}_${Date.now()}`,
-    parameters: opts.parameters ?? [],
-  };
-  // Attach the per-lead PDF as the DOCUMENT header media. NOTE: confirm the exact
-  // field your WATI tenant expects from the WATI API Docs page — some use
-  // `media`/`mediaUrl`, others a header parameter. If a test send rejects this,
-  // this block is the one line to adjust.
-  if (opts.document) {
-    body.media = { type: "document", url: opts.document.url, filename: opts.document.filename };
+  const parameters: WaParam[] = [...(opts.parameters ?? [])];
+  if (opts.headerDocument) {
+    parameters.push({ name: opts.headerDocument.paramName, value: opts.headerDocument.url });
   }
+  const url = `${env.watiEndpoint()}/api/v1/sendTemplateMessage?whatsappNumber=${encodeURIComponent(number)}`;
   const r = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.watiToken()}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      template_name: opts.templateName,
+      broadcast_name: opts.broadcastName ?? `${opts.templateName}_${Date.now()}`,
+      parameters,
+    }),
   });
   if (!r.ok) throw new Error(`WATI send failed: ${r.status} ${await r.text()}`);
   const j = (await r.json().catch(() => ({}))) as { result?: boolean | string };

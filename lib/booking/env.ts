@@ -28,6 +28,8 @@ export const env = {
   // WhatsApp (WATI)
   watiEndpoint: () => req("WATI_API_ENDPOINT").replace(/\/+$/, ""),
   watiToken: () => req("WATI_ACCESS_TOKEN"),
+  // Name of the WA-5 document-header variable (must match the WATI template).
+  watiDocParam: () => opt("WATI_WA5_DOC_PARAM", "pdfLink"),
 
   // Slack
   slackWebhook: () => opt("SLACK_WEBHOOK_URL"),
