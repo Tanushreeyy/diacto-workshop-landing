@@ -56,6 +56,22 @@ Nurture cadence: **WA-2** at the first 10:00/17:00 IST slot, **WA-3** next slot,
 then **WA-4** twice daily (10:00 & 17:00) until booked. Quiet hours 22:00–09:00.
 Variable order/values live in `lib/booking/messages.ts` → `waParamsFor`.
 
+### Auto-creating the templates (optional)
+
+WATI's API can't create templates, but Meta's WhatsApp Business Management API
+can — and they then appear in WATI (same WABA). `scripts/create-wa-templates.mjs`
+creates all 8 in one run:
+
+```bash
+META_ACCESS_TOKEN=<system-user token w/ whatsapp_business_management> \
+META_WABA_ID=1014712724510403 \
+npm run create-templates
+```
+
+Get the token from Meta **Business Settings → System Users** (assign the WhatsApp
+account asset). Works only if the WABA is in your Business Manager; otherwise
+create them in the WATI dashboard. Meta still reviews for approval either way.
+
 ## Cron — pick one (the tick just needs to be called hourly)
 
 The engine is `POST /api/cron/tick`, guarded by `CRON_SECRET`.
