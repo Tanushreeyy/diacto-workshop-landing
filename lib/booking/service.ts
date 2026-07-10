@@ -172,16 +172,19 @@ async function confirmRow(table: Table, row: SheetRow): Promise<{ regId: string;
     [C.passSent]: nowIso(),
   });
 
-  // WA-5 confirmation
+  // WA-5 confirmation — attaches the Event Pass PDF as a native document header.
   if (phone) {
     try {
       await sendTemplate({
         whatsappNumber: phone,
         templateName: WA_TEMPLATES.WA5,
         parameters: waParamsFor(WA_TEMPLATES.WA5, ctx),
+        document: ctx.passUrl
+          ? { url: ctx.passUrl, filename: `Event_Pass_${firstNameOf(name)}.pdf` }
+          : undefined,
       });
     } catch (e) {
-      console.error(`[confirm] WA-6 failed for row ${row.rowNumber}:`, e);
+      console.error(`[confirm] WA-5 failed for row ${row.rowNumber}:`, e);
     }
   }
   // EM-1 with the generated pass

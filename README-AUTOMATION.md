@@ -50,7 +50,7 @@ and support number are static, so they are not variables.
 | `WATI_TPL_WA2` | `wa_2_value_nudge` | nurture touch 1 | `{{1}}` · `{{2}}` booking link |
 | `WATI_TPL_WA3` | `wa_3_problem_nudge` | nurture touch 2 | `{{1}}` · `{{2}}` booking link |
 | `WATI_TPL_WA4` | `wa_4_urgency_nudge` | nurture, repeats 2×/day | `{{1}}` · `{{2}}` booking link |
-| `WATI_TPL_WA5` | `wa_5_confirmation` | on confirm | `{{1}}` first name · `{{2}}` Event Pass link |
+| `WATI_TPL_WA5` | `wa_5_confirmation` | on confirm | `{{1}}` first name · **Document header** = Event Pass PDF |
 | `WATI_TPL_WA6` | `wa_6_day_before` | 1 day before | `{{1}}` · `{{2}}` Event Pass link |
 | `WATI_TPL_WA7` | `wa_7_morning_of` | morning of | `{{1}}` · `{{2}}` Event Pass link |
 | `WATI_TPL_WA8` | `wa_8_two_hour` | 2 hours before | `{{1}}` · `{{2}}` Event Pass link |

@@ -17,12 +17,18 @@ TEMPLATES.forEach((t, i) => {
     .map((lbl, j) => `  {{${j + 1}}} = ${lbl.padEnd(20)} sample: ${t.example[j]}`)
     .join("\n");
 
+  const headerBlock =
+    t.headerFormat === "DOCUMENT"
+      ? "────────── HEADER  (type: Document / Media) ──────────\n" +
+        "Upload a sample Event Pass PDF here in WATI. At send time, each attendee's\n" +
+        "own pass is attached automatically (per-recipient media)."
+      : `────────── HEADER  (type: Text) ──────────\n${HEADER}`;
+
   const txt = `Template name : ${t.name}
 Category      : ${cat(t.category)}
 Language      : English (en)
 
-────────── HEADER  (type: Text) ──────────
-${HEADER}
+${headerBlock}
 
 ────────── BODY ──────────
 ${t.body}

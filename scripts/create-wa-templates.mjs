@@ -26,9 +26,13 @@ export const BUTTON = { type: "URL", text: "📍 Get Directions", url: MAP_URL }
 const EX_NAME = "Priya";
 const EX_LINK = "https://diacto-workshop.example.com/?rid=abc123";
 const EX_PASS = "https://diacto-workshop.example.com/api/pass?rid=abc123";
+// For the DOCUMENT-header template (WA-5), Meta needs a sample media handle at
+// creation. Upload a sample PDF via Meta's resumable upload API and set this env.
+const SAMPLE_DOC_HANDLE = process.env.META_SAMPLE_DOC_HANDLE || "";
 
 const V_BOOK = ["First name", "Booking link"];
 const V_PASS = ["First name", "Event Pass link"];
+const V_NAME = ["First name"];
 
 // name, category, variable labels, ordered example values, and body text.
 export const TEMPLATES = [
@@ -85,13 +89,13 @@ export const TEMPLATES = [
   {
     name: "wa_5_confirmation",
     category: "UTILITY",
-    labels: V_PASS,
-    example: [EX_NAME, EX_PASS],
+    headerFormat: "DOCUMENT", // Event Pass PDF attached as the header
+    labels: V_NAME,
+    example: [EX_NAME],
     body:
       "🎉 Congratulations {{1}}! Your seat for the High-Performance Teams Workshop is CONFIRMED.\n" +
       "🗓 Fri, 17 July  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune\n" +
-      "📎 Your Event Pass: {{2}}\n" +
-      "Also emailed to you — carry it (digital or print) for entry. Tap “Get Directions” below. See you there! 🚀",
+      "Your Event Pass is attached above 📎 — carry it (digital or print) for entry. Our team will call you shortly. Tap “Get Directions” below. See you there! 🚀",
   },
   {
     name: "wa_6_day_before",
@@ -126,8 +130,16 @@ export const TEMPLATES = [
 ];
 
 function payload(t) {
+  const header =
+    t.headerFormat === "DOCUMENT"
+      ? {
+          type: "HEADER",
+          format: "DOCUMENT",
+          example: { header_handle: [SAMPLE_DOC_HANDLE || "<UPLOAD_SAMPLE_PDF_HANDLE>"] },
+        }
+      : { type: "HEADER", format: "TEXT", text: HEADER };
   const components = [
-    { type: "HEADER", format: "TEXT", text: HEADER },
+    header,
     { type: "BODY", text: t.body, example: { body_text: [t.example] } },
     { type: "FOOTER", text: FOOTER },
     { type: "BUTTONS", buttons: [BUTTON] },

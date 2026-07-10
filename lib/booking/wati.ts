@@ -22,21 +22,31 @@ export async function sendTemplate(opts: {
   templateName: string;
   broadcastName?: string;
   parameters?: WaParam[];
+  // Per-recipient header media, for templates with a DOCUMENT header (WA-5).
+  document?: { url: string; filename: string };
 }): Promise<void> {
   const number = normalizeWhatsApp(opts.whatsappNumber);
   if (!number) throw new Error("WATI send: empty/invalid whatsapp number");
   const url = `${env.watiEndpoint()}/api/v1/sendTemplateMessage?whatsappNumber=${encodeURIComponent(number)}`;
+  const body: Record<string, unknown> = {
+    template_name: opts.templateName,
+    broadcast_name: opts.broadcastName ?? `${opts.templateName}_${Date.now()}`,
+    parameters: opts.parameters ?? [],
+  };
+  // Attach the per-lead PDF as the DOCUMENT header media. NOTE: confirm the exact
+  // field your WATI tenant expects from the WATI API Docs page — some use
+  // `media`/`mediaUrl`, others a header parameter. If a test send rejects this,
+  // this block is the one line to adjust.
+  if (opts.document) {
+    body.media = { type: "document", url: opts.document.url, filename: opts.document.filename };
+  }
   const r = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.watiToken()}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      template_name: opts.templateName,
-      broadcast_name: opts.broadcastName ?? `${opts.templateName}_${Date.now()}`,
-      parameters: opts.parameters ?? [],
-    }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(`WATI send failed: ${r.status} ${await r.text()}`);
   const j = (await r.json().catch(() => ({}))) as { result?: boolean | string };
