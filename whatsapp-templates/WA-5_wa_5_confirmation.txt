@@ -6,18 +6,16 @@ Language      : English (en)
 🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
 
 ────────── BODY ──────────
-🎉 {{1}}, your seat for the High-Performance Teams Workshop is CONFIRMED!
+🎉 Congratulations {{1}}! Your seat for the High-Performance Teams Workshop is CONFIRMED.
 🗓 Fri, 17 July  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune
-🗺 {{2}}
 📩 Your Event Pass (PDF) is in your email — carry it (digital or print) for entry. Our team will call you shortly.
-See you there! 🚀
+Tap “Get Directions” below. See you there! 🚀
 
 ────────── FOOTER ──────────
 Diacto Technologies
 
 ────────── VARIABLES / SAMPLE VALUES ──────────
   {{1}} = First name           sample: Priya
-  {{2}} = Location (map) link  sample: https://maps.app.goo.gl/MtpixrnbfgNFHYku5
 
 ────────── BUTTONS ──────────
-None
+[URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

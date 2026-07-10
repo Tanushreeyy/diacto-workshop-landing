@@ -4,7 +4,7 @@
 
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
-import { TEMPLATES, HEADER, FOOTER } from "./create-wa-templates.mjs";
+import { TEMPLATES, HEADER, FOOTER, BUTTON } from "./create-wa-templates.mjs";
 
 const OUT = "whatsapp-templates";
 mkdirSync(OUT, { recursive: true });
@@ -34,7 +34,7 @@ ${FOOTER}
 ${vars}
 
 ────────── BUTTONS ──────────
-None
+[URL button · static]  ${BUTTON.text}  →  ${BUTTON.url}
 `;
 
   const file = `WA-${num}_${t.name}.txt`;

@@ -11,9 +11,9 @@ In 3 hours you'll get:
 ✅ The A.S.K. Framework to hire right, every time
 ✅ Scientific Hiring — no more gut-feel decisions
 ✅ Ready-to-use tools & templates
-🗓 Fri, 17 July  |  3–6 PM  |  Baner, Pune  |  FREE
-👉 {{2}}
-📍 Directions: {{3}}
+🗓 Fri, 17 July | 3–6 PM | Baner, Pune | FREE
+Confirm your seat here: {{2}}
+Don't miss it — seats are limited. 👇
 
 ────────── FOOTER ──────────
 Diacto Technologies
@@ -21,7 +21,6 @@ Diacto Technologies
 ────────── VARIABLES / SAMPLE VALUES ──────────
   {{1}} = First name           sample: Priya
   {{2}} = Booking link         sample: https://diacto-workshop.example.com/?rid=abc123
-  {{3}} = Location (map) link  sample: https://maps.app.goo.gl/MtpixrnbfgNFHYku5
 
 ────────── BUTTONS ──────────
-None
+[URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

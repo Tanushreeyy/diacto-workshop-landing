@@ -8,9 +8,8 @@ Language      : English (en)
 ────────── BODY ──────────
 Hi {{1}} 👋 Thanks for your interest in the High-Performance Teams Workshop — FREE, exclusively for Founders & Business Owners.
 🗓 Fri, 17 July  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune
-⚠️ Your seat is not confirmed yet. Book in 30 seconds:
-👉 {{2}}
-📍 Directions: {{3}}
+⚠️ Your seat is not confirmed yet. Book in 30 seconds here: {{2}}
+Tap “Get Directions” below for the venue map. See you there! 🚀
 
 ────────── FOOTER ──────────
 Diacto Technologies
@@ -18,7 +17,6 @@ Diacto Technologies
 ────────── VARIABLES / SAMPLE VALUES ──────────
   {{1}} = First name           sample: Priya
   {{2}} = Booking link         sample: https://diacto-workshop.example.com/?rid=abc123
-  {{3}} = Location (map) link  sample: https://maps.app.goo.gl/MtpixrnbfgNFHYku5
 
 ────────── BUTTONS ──────────
-None
+[URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

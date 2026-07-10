@@ -6,16 +6,14 @@ Language      : English (en)
 🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
 
 ────────── BODY ──────────
-{{1}}, the High-Performance Teams Workshop goes live in 2 hours! ⏳ 3:00 PM sharp, Prabhavee Tech Park, Baner. 🗺 {{2}}
-Show your Event Pass at check-in. Need help? Call {{3}}. 🚀
+Hi {{1}}, the High-Performance Teams Workshop goes live in 2 hours! ⏳ 3:00 PM sharp, Prabhavee Tech Park, Baner.
+Show your Event Pass at check-in. Need help? Call +91 7387731069. Tap “Get Directions” below. 🚀
 
 ────────── FOOTER ──────────
 Diacto Technologies
 
 ────────── VARIABLES / SAMPLE VALUES ──────────
   {{1}} = First name           sample: Priya
-  {{2}} = Location (map) link  sample: https://maps.app.goo.gl/MtpixrnbfgNFHYku5
-  {{3}} = Support number       sample: +91 7387731069
 
 ────────── BUTTONS ──────────
-None
+[URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

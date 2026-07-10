@@ -14,14 +14,18 @@ For each file, copy the fields into the WATI builder:
 | Body | paste the `BODY` block (keep the `{{1}} {{2}} {{3}}`) |
 | Footer | paste the `FOOTER` line |
 | Sample values | use the `VARIABLES / SAMPLE VALUES` samples (Meta needs them) |
-| Buttons | None |
+| Buttons | add one **URL button** — text `📍 Get Directions`, static URL = the map link |
 
-The `{{n}}` numbers and their meaning **must** match what the code sends
+**Meta rules baked into this copy:** the body never starts or ends with a
+variable, and there are no two adjacent variables. The map and support number are
+**static**, so the map is a static button and the number is hardcoded — neither
+is a variable.
+
+The `{{n}}` numbers **must** match what the code sends
 (`lib/booking/messages.ts` → `waParamsFor`):
 
-- **WA-1…WA-4:** `{{1}}` first name · `{{2}}` booking link · `{{3}}` location link
-- **WA-5 / WA-6 / WA-7:** `{{1}}` first name · `{{2}}` location link
-- **WA-8:** `{{1}}` first name · `{{2}}` location link · `{{3}}` support number
+- **WA-1…WA-4:** `{{1}}` first name · `{{2}}` booking link
+- **WA-5…WA-8:** `{{1}}` first name
 
 If you rename a template in WATI, set the matching `WATI_TPL_WA*` env var so the
 code sends the right name.

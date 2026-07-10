@@ -41,20 +41,23 @@ Meta Instant Form ──▶ Google Sheet (source of truth)
 
 ## WhatsApp templates (create + approve in WATI, then map names)
 
-| Env | Default name | When | Variables |
-|-----|--------------|------|-----------|
-| `WATI_TPL_WA1` | `wa_1_booking_pending` | instant ack | `{{1}}` first name · `{{2}}` booking link · `{{3}}` location link |
-| `WATI_TPL_WA2` | `wa_2_value_nudge` | nurture touch 1 | `{{1}}` · `{{2}}` booking link · `{{3}}` location link |
-| `WATI_TPL_WA3` | `wa_3_problem_nudge` | nurture touch 2 | `{{1}}` · `{{2}}` booking link · `{{3}}` location link |
-| `WATI_TPL_WA4` | `wa_4_urgency_nudge` | nurture, repeats 2×/day | `{{1}}` · `{{2}}` booking link · `{{3}}` location link |
-| `WATI_TPL_WA5` | `wa_5_confirmation` | on confirm | `{{1}}` · `{{2}}` location link |
-| `WATI_TPL_WA6` | `wa_6_day_before` | 1 day before | `{{1}}` · `{{2}}` location link |
-| `WATI_TPL_WA7` | `wa_7_morning_of` | morning of | `{{1}}` · `{{2}}` location link |
-| `WATI_TPL_WA8` | `wa_8_two_hour` | 2 hours before | `{{1}}` · `{{2}}` location link · `{{3}}` support number |
+Every template has a static **📍 Get Directions** URL button (map link); the map
+and support number are static, so they are not variables.
+
+| Env | Default name | When | Body variables |
+|-----|--------------|------|----------------|
+| `WATI_TPL_WA1` | `wa_1_booking_pending` | instant ack | `{{1}}` first name · `{{2}}` booking link |
+| `WATI_TPL_WA2` | `wa_2_value_nudge` | nurture touch 1 | `{{1}}` · `{{2}}` booking link |
+| `WATI_TPL_WA3` | `wa_3_problem_nudge` | nurture touch 2 | `{{1}}` · `{{2}}` booking link |
+| `WATI_TPL_WA4` | `wa_4_urgency_nudge` | nurture, repeats 2×/day | `{{1}}` · `{{2}}` booking link |
+| `WATI_TPL_WA5` | `wa_5_confirmation` | on confirm | `{{1}}` first name |
+| `WATI_TPL_WA6` | `wa_6_day_before` | 1 day before | `{{1}}` first name |
+| `WATI_TPL_WA7` | `wa_7_morning_of` | morning of | `{{1}}` first name |
+| `WATI_TPL_WA8` | `wa_8_two_hour` | 2 hours before | `{{1}}` first name |
 
 Nurture cadence: **WA-2** at the first 10:00/17:00 IST slot, **WA-3** next slot,
 then **WA-4** twice daily (10:00 & 17:00) until booked. Quiet hours 22:00–09:00.
-Variable order/values live in `lib/booking/messages.ts` → `waParamsFor`.
+Body-variable order/values live in `lib/booking/messages.ts` → `waParamsFor`.
 
 ### Auto-creating the templates (optional)
 

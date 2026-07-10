@@ -36,31 +36,23 @@ export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: 
   return { subject: fill(tpl.subject), html: fill(tpl.html) };
 }
 
-// WhatsApp template variable maps. These must line up with the {{1}},{{2}}…
-// placeholders in the corresponding approved WATI template.
-//   WA-1…WA-4 : {{1}} first name · {{2}} booking link · {{3}} location link
-//   WA-5/6/7  : {{1}} first name · {{2}} location link
-//   WA-8      : {{1}} first name · {{2}} location link · {{3}} support number
+// WhatsApp template body-variable maps. The venue map + support number are
+// STATIC (a static "Get Directions" URL button + hardcoded text in the template),
+// so the only body variables are {{1}} first name and — on WA-1..4 — {{2}}
+// booking link.
+//   WA-1…WA-4 : {{1}} first name · {{2}} booking link
+//   WA-5…WA-8 : {{1}} first name
 export function waParamsFor(templateName: string, ctx: MsgCtx): WaParam[] {
   const fn: WaParam = { name: "1", value: ctx.firstName };
   const bookingLink: WaParam = { name: "2", value: ctx.bookingLink };
-  const mapAt2: WaParam = { name: "2", value: ctx.mapUrl };
-  const mapAt3: WaParam = { name: "3", value: ctx.mapUrl };
-  const supportAt3: WaParam = { name: "3", value: ctx.support };
 
   switch (templateName) {
     case WA_TEMPLATES.WA1:
     case WA_TEMPLATES.WA2:
     case WA_TEMPLATES.WA3:
     case WA_TEMPLATES.WA4:
-      return [fn, bookingLink, mapAt3];
-    case WA_TEMPLATES.WA5:
-    case WA_TEMPLATES.WA6:
-    case WA_TEMPLATES.WA7:
-      return [fn, mapAt2];
-    case WA_TEMPLATES.WA8:
-      return [fn, mapAt2, supportAt3];
-    default:
       return [fn, bookingLink];
+    default:
+      return [fn];
   }
 }
