@@ -6,10 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "cron": "node scripts/cron.mjs"
   },
   "dependencies": {
+    "google-auth-library": "^9.14.1",
     "next": "^14.2.35",
+    "node-cron": "^3.0.3",
+    "pdf-lib": "^1.17.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
