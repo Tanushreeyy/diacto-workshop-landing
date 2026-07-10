@@ -51,10 +51,10 @@ export interface ReminderSpec {
 //   Morning of  17 Jul 09:00 IST = 03:30Z → EM-3 + WA-7
 //   2h before   17 Jul 13:00 IST = 07:30Z → EM-4 + WA-8
 export const REMINDERS: ReminderSpec[] = [
-  { key: "EM2", at: "2026-07-16T04:30:00Z", kind: "email" },
+  { key: "EM6", at: "2026-07-16T04:30:00Z", kind: "email" },
   { key: "WA6", at: "2026-07-16T04:30:00Z", kind: "wa" },
-  { key: "EM3", at: "2026-07-17T03:30:00Z", kind: "email" },
+  { key: "EM7", at: "2026-07-17T03:30:00Z", kind: "email" },
   { key: "WA7", at: "2026-07-17T03:30:00Z", kind: "wa" },
-  { key: "EM4", at: "2026-07-17T07:30:00Z", kind: "email" },
+  { key: "EM8", at: "2026-07-17T07:30:00Z", kind: "email" },
   { key: "WA8", at: "2026-07-17T07:30:00Z", kind: "wa" },
 ];

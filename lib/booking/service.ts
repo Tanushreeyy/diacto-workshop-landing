@@ -108,10 +108,10 @@ async function ingestLead(table: Table, row: SheetRow): Promise<void> {
   }
   if (email) {
     try {
-      const { subject, html } = emailFor("EM0A", ctx);
+      const { subject, html } = emailFor("EM1", ctx); // instant ack
       await sendMail({ to: email, subject, html });
     } catch (e) {
-      console.error(`[ingest] EM-0a failed for row ${row.rowNumber}:`, e);
+      console.error(`[ingest] EM-1 failed for row ${row.rowNumber}:`, e);
     }
   }
 }
@@ -138,10 +138,12 @@ async function nurtureLead(table: Table, row: SheetRow): Promise<void> {
   }
   if (email) {
     try {
-      const { subject, html } = emailFor("EM0", ctx);
+      // Email nurture ladder parallels WhatsApp: EM-2 → EM-3 → EM-4 (repeats).
+      const emailKind = stage === 0 ? "EM2" : stage === 1 ? "EM3" : "EM4";
+      const { subject, html } = emailFor(emailKind, ctx);
       await sendMail({ to: email, subject, html });
     } catch (e) {
-      console.error(`[nurture] EM-0 failed for row ${row.rowNumber}:`, e);
+      console.error(`[nurture] email failed for row ${row.rowNumber}:`, e);
     }
   }
   await updateRow(row.rowNumber, table, {
@@ -186,7 +188,7 @@ async function confirmRow(table: Table, row: SheetRow): Promise<{ regId: string;
   if (email) {
     try {
       const pass = await generatePassBase64({ name, company, regId });
-      const { subject, html } = emailFor("EM1", ctx);
+      const { subject, html } = emailFor("EM5", ctx); // confirmation + pass
       await sendMail({
         to: email,
         subject,
@@ -229,7 +231,7 @@ async function remindLead(table: Table, row: SheetRow): Promise<number> {
   for (const r of due) {
     try {
       if (r.kind === "email") {
-        const kind = r.key === "EM2" ? "EM2" : r.key === "EM3" ? "EM3" : "EM4";
+        const kind = r.key === "EM6" ? "EM6" : r.key === "EM7" ? "EM7" : "EM8";
         const { subject, html } = emailFor(kind, ctx);
         const attachments = regId
           ? [
