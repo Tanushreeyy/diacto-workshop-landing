@@ -1,0 +1,20 @@
+Template name : wa_6_day_before
+Category      : Utility
+Language      : English (en)
+
+────────── HEADER  (type: Text) ──────────
+🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
+
+────────── BODY ──────────
+Hi {{1}}! Tomorrow at 3 PM — High-Performance Teams Workshop, Prabhavee Tech Park, Baner. 🗺 {{2}}
+Your Event Pass is in your email 📩. Check-in opens 2:30 PM. See you there! 🚀
+
+────────── FOOTER ──────────
+Diacto Technologies
+
+────────── VARIABLES / SAMPLE VALUES ──────────
+  {{1}} = First name           sample: Priya
+  {{2}} = Location (map) link  sample: https://maps.app.goo.gl/MtpixrnbfgNFHYku5
+
+────────── BUTTONS ──────────
+None

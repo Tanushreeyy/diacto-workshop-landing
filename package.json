@@ -9,6 +9,7 @@
     "lint": "next lint",
     "cron": "node scripts/cron.mjs",
     "create-templates": "node scripts/create-wa-templates.mjs",
+    "export-wa-templates": "node scripts/export-wa-templates.mjs",
     "build-emails": "node scripts/build-emails.mjs"
   },
   "dependencies": {

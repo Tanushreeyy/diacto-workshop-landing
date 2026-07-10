@@ -1,0 +1,20 @@
+Template name : wa_7_morning_of
+Category      : Utility
+Language      : English (en)
+
+────────── HEADER  (type: Text) ──────────
+🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
+
+────────── BODY ──────────
+Good morning {{1}}! ☀️ The High-Performance Teams Workshop is today at 3 PM — doors open 2:30 PM, Prabhavee Tech Park, Baner. 🗺 {{2}}
+Carry your Event Pass (in your email 📩). Friday traffic in Baner — leave early! See you soon. ✅
+
+────────── FOOTER ──────────
+Diacto Technologies
+
+────────── VARIABLES / SAMPLE VALUES ──────────
+  {{1}} = First name           sample: Priya
+  {{2}} = Location (map) link  sample: https://maps.app.goo.gl/MtpixrnbfgNFHYku5
+
+────────── BUTTONS ──────────
+None

@@ -1,0 +1,25 @@
+Template name : wa_3_problem_nudge
+Category      : Marketing
+Language      : English (en)
+
+────────── HEADER  (type: Text) ──────────
+🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
+
+────────── BODY ──────────
+{{1}}, one question 👇
+Is your business growing as fast as it should — or is your team slowing you down?
+Wrong hiring is one of the biggest reasons businesses fail to scale. The High-Performance Teams Workshop shows you how to fix it — scientifically.
+🗓 Fri, 17 July  |  3–6 PM  |  Baner, Pune
+👉 Confirm your seat: {{2}}
+📍 Directions: {{3}}
+
+────────── FOOTER ──────────
+Diacto Technologies
+
+────────── VARIABLES / SAMPLE VALUES ──────────
+  {{1}} = First name           sample: Priya
+  {{2}} = Booking link         sample: https://diacto-workshop.example.com/?rid=abc123
+  {{3}} = Location (map) link  sample: https://maps.app.goo.gl/MtpixrnbfgNFHYku5
+
+────────── BUTTONS ──────────
+None
