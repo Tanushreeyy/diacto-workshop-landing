@@ -1,6 +1,11 @@
-// Orchestration: the booking workflow logic. Reads/writes the sheet and drives
-// WhatsApp (WATI), email (Graph) and Slack. All state lives in the sheet, so
-// every operation is idempotent — safe to call the tick twice.
+// Orchestration: the booking workflow.
+//
+// Two tabs:
+//   • form tab (v2_form)   — owned by Meta's connector. READ ONLY.
+//   • automation tab       — all our state, keyed by the form's `lead_id`.
+// Keeping state off the form tab means a form/connector change can never shift
+// or clobber booking state. Every operation is idempotent — the tick is safe to
+// run twice, and missed ticks self-heal on the next run.
 
 import crypto from "crypto";
 import { env } from "./env";
@@ -10,6 +15,7 @@ import {
   updateRow,
   appendRow,
   cell,
+  resolveHeader,
   Table,
   SheetRow,
 } from "./google";
@@ -20,12 +26,13 @@ import { generatePass, generatePassBase64 } from "./pass";
 import { emailFor, waParamsFor, MsgCtx } from "./messages";
 import { dueForNurture, dueReminders, isQuietHours, nowIso } from "./schedule";
 
-// Column header names (must match the sheet).
-const C = {
-  fullName: "full_name",
+// ---- automation tab columns (ours) ----
+const A = {
+  leadId: "lead_id",
+  name: "name",
   email: "email",
   phone: "phone",
-  company: "company_name",
+  company: "company",
   regId: "reg_id",
   token: "confirm_token",
   done: "registration_complete",
@@ -34,9 +41,28 @@ const C = {
   lastNudge: "last_nudge_at",
   passSent: "pass_sent_at",
   remindersSent: "reminders_sent",
+  source: "source",
 } as const;
 
+// ---- form tab columns (theirs) — resolved by candidate names ----
+const FORM = {
+  id: ["id"],
+  name: ["your_name:", "full_name", "name"],
+  email: ["email", "email_address"],
+  phone: ["phone", "phone_number"],
+  company: ["organization_name:", "company_name", "company"],
+};
+
 const isDone = (v: string) => (v || "").trim().toUpperCase() === "TRUE";
+
+interface LeadData {
+  leadId: string;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  regId?: string;
+}
 
 function firstNameOf(fullName: string): string {
   const n = (fullName || "").trim().split(/\s+/)[0];
@@ -56,23 +82,25 @@ export function bookingLink(token: string): string {
   return `${env.landingBaseUrl()}/?rid=${encodeURIComponent(token)}`;
 }
 
-// Skip Meta's dummy test leads so we never message placeholder data.
-function isTestLead(table: Table, row: SheetRow): boolean {
-  const email = cell(table, row, C.email).toLowerCase();
-  const name = cell(table, row, C.fullName);
-  return email === "test@meta.com" || name.includes("<test");
-}
-
 function passUrl(token: string): string {
   return `${env.landingBaseUrl()}/api/pass?rid=${encodeURIComponent(token)}`;
 }
 
-function ctxFor(table: Table, row: SheetRow, token: string): MsgCtx {
+// Skip Meta's dummy test leads so we never message placeholder data.
+function isTestLead(l: LeadData): boolean {
+  return (
+    l.email.toLowerCase() === "test@meta.com" ||
+    l.name.includes("<test") ||
+    l.phone.includes("<test")
+  );
+}
+
+function ctxFor(l: LeadData, token: string): MsgCtx {
   return {
-    firstName: firstNameOf(cell(table, row, C.fullName)),
+    firstName: firstNameOf(l.name),
     bookingLink: bookingLink(token),
     passUrl: passUrl(token),
-    regId: cell(table, row, C.regId) || undefined,
+    regId: l.regId,
     dateLabel: WORKSHOP.dateLabel,
     timeLabel: WORKSHOP.timeLabel,
     venue: WORKSHOP.venue,
@@ -81,105 +109,141 @@ function ctxFor(table: Table, row: SheetRow, token: string): MsgCtx {
   };
 }
 
-// ---- Ingest: brand-new lead → assign token, send WA-1 + EM-0a ----
-async function ingestLead(table: Table, row: SheetRow): Promise<void> {
-  const token = genToken();
-  const ctx = ctxFor(table, row, token);
-  const email = cell(table, row, C.email);
-  const phone = cell(table, row, C.phone);
+function leadFromAuto(auto: Table, row: SheetRow): LeadData {
+  return {
+    leadId: cell(auto, row, A.leadId),
+    name: cell(auto, row, A.name),
+    email: cell(auto, row, A.email),
+    phone: cell(auto, row, A.phone),
+    company: cell(auto, row, A.company),
+    regId: cell(auto, row, A.regId) || undefined,
+  };
+}
 
-  // Persist token FIRST so the lead is never re-ingested even if a send fails.
-  await updateRow(row.rowNumber, table, {
-    [C.token]: token,
-    [C.nurtureStage]: "0",
-    [C.lastNudge]: nowIso(),
+// ---- Ingest: new form lead → automation row + WA-1 + EM-1 ----
+async function ingestLead(auto: Table, l: LeadData, source: string): Promise<void> {
+  const token = genToken();
+  await appendRow(auto, {
+    [A.leadId]: l.leadId,
+    [A.name]: l.name,
+    [A.email]: l.email,
+    [A.phone]: l.phone,
+    [A.company]: l.company,
+    [A.token]: token,
+    [A.nurtureStage]: "0",
+    [A.lastNudge]: nowIso(),
+    [A.source]: source,
   });
 
-  if (phone) {
+  const ctx = ctxFor(l, token);
+  const sent: string[] = [];
+  const failed: string[] = [];
+
+  if (l.phone) {
     try {
       await sendTemplate({
-        whatsappNumber: phone,
+        whatsappNumber: l.phone,
         templateName: WA_TEMPLATES.WA1,
         parameters: waParamsFor(WA_TEMPLATES.WA1, ctx),
       });
+      sent.push("WA-1");
     } catch (e) {
-      console.error(`[ingest] WA-1 failed for row ${row.rowNumber}:`, e);
+      failed.push("WA-1");
+      console.error(`[ingest] WA-1 failed for ${l.leadId}:`, e);
     }
   }
-  if (email) {
+  if (l.email) {
     try {
-      const { subject, html } = emailFor("EM1", ctx); // instant ack
-      await sendMail({ to: email, subject, html });
+      const { subject, html } = emailFor("EM1", ctx);
+      await sendMail({ to: l.email, subject, html });
+      sent.push("EM-1");
     } catch (e) {
-      console.error(`[ingest] EM-1 failed for row ${row.rowNumber}:`, e);
+      failed.push("EM-1");
+      console.error(`[ingest] EM-1 failed for ${l.leadId}:`, e);
     }
   }
+
+  await notifySlack(
+    `:inbox_tray: *New lead* — ${l.name || "Unknown"}` +
+      (sent.length ? ` · sent ${sent.join(" + ")}` : "") +
+      (failed.length ? ` · :warning: failed ${failed.join(", ")}` : ""),
+  );
 }
 
-// ---- Nurture: pending lead due for a twice-daily touch (WA ladder + EM-0) ----
-async function nurtureLead(table: Table, row: SheetRow): Promise<void> {
-  const token = cell(table, row, C.token);
-  const ctx = ctxFor(table, row, token);
-  const stage = parseInt(cell(table, row, C.nurtureStage) || "0", 10) || 0;
+// ---- Nurture: twice-daily touch (WA ladder + email ladder) ----
+async function nurtureLead(auto: Table, row: SheetRow): Promise<void> {
+  const l = leadFromAuto(auto, row);
+  const token = cell(auto, row, A.token);
+  const ctx = ctxFor(l, token);
+  const stage = parseInt(cell(auto, row, A.nurtureStage) || "0", 10) || 0;
   const tpl = WA_NURTURE_LADDER[Math.min(stage, WA_NURTURE_LADDER.length - 1)];
-  const email = cell(table, row, C.email);
-  const phone = cell(table, row, C.phone);
+  const emailKind = stage === 0 ? "EM2" : stage === 1 ? "EM3" : "EM4";
 
-  if (phone) {
+  const sent: string[] = [];
+  const failed: string[] = [];
+
+  if (l.phone) {
     try {
       await sendTemplate({
-        whatsappNumber: phone,
+        whatsappNumber: l.phone,
         templateName: tpl,
         parameters: waParamsFor(tpl, ctx),
       });
+      sent.push(tpl);
     } catch (e) {
-      console.error(`[nurture] WA failed for row ${row.rowNumber}:`, e);
+      failed.push(tpl);
+      console.error(`[nurture] WA failed for ${l.leadId}:`, e);
     }
   }
-  if (email) {
+  if (l.email) {
     try {
-      // Email nurture ladder parallels WhatsApp: EM-2 → EM-3 → EM-4 (repeats).
-      const emailKind = stage === 0 ? "EM2" : stage === 1 ? "EM3" : "EM4";
       const { subject, html } = emailFor(emailKind, ctx);
-      await sendMail({ to: email, subject, html });
+      await sendMail({ to: l.email, subject, html });
+      sent.push(emailKind);
     } catch (e) {
-      console.error(`[nurture] email failed for row ${row.rowNumber}:`, e);
+      failed.push(emailKind);
+      console.error(`[nurture] email failed for ${l.leadId}:`, e);
     }
   }
-  await updateRow(row.rowNumber, table, {
-    [C.nurtureStage]: String(stage + 1),
-    [C.lastNudge]: nowIso(),
+
+  await updateRow(auto, row.rowNumber, {
+    [A.nurtureStage]: String(stage + 1),
+    [A.lastNudge]: nowIso(),
   });
+
+  await notifySlack(
+    `:bell: *Nudge* (touch ${stage + 1}) — ${l.name || "Unknown"}` +
+      (sent.length ? ` · sent ${sent.join(" + ")}` : "") +
+      (failed.length ? ` · :warning: failed ${failed.join(", ")}` : ""),
+  );
 }
 
-// ---- Confirm: booking gate flipped → WA-6 + EM-1 (pass) ----
-async function confirmRow(table: Table, row: SheetRow): Promise<{ regId: string; name: string }> {
-  const existingRegId = cell(table, row, C.regId);
-  const regId = existingRegId || genRegId();
-  const token = cell(table, row, C.token) || genToken();
-  const name = cell(table, row, C.fullName) || "Guest";
-  const company = cell(table, row, C.company) || "";
-  const email = cell(table, row, C.email);
-  const phone = cell(table, row, C.phone);
-  const ctx = { ...ctxFor(table, row, token), regId };
+// ---- Confirm: booking gate → WA-5 + EM-5 (pass) ----
+async function confirmRow(
+  auto: Table,
+  row: SheetRow,
+): Promise<{ regId: string; name: string }> {
+  const l = leadFromAuto(auto, row);
+  const regId = l.regId || genRegId();
+  const token = cell(auto, row, A.token) || genToken();
+  const ctx = { ...ctxFor({ ...l, regId }, token), regId };
 
-  // Flip the gate + stamp everything first (idempotent guard).
-  await updateRow(row.rowNumber, table, {
-    [C.done]: "TRUE",
-    [C.bookedAt]: nowIso(),
-    [C.regId]: regId,
-    [C.token]: token,
-    [C.passSent]: nowIso(),
+  await updateRow(auto, row.rowNumber, {
+    [A.done]: "TRUE",
+    [A.bookedAt]: nowIso(),
+    [A.regId]: regId,
+    [A.token]: token,
+    [A.passSent]: nowIso(),
   });
 
-  // WA-5 confirmation. Default: the pass goes as a tap-to-download link in the
-  // body ({{2}}). With WA5_NATIVE_DOC=true it is attached natively via a dynamic
-  // DOCUMENT header instead (body is then {{1}}-only).
-  if (phone) {
+  const sent: string[] = [];
+  const failed: string[] = [];
+
+  if (l.phone) {
     try {
       const nativeDoc = env.wa5NativeDoc();
       await sendTemplate({
-        whatsappNumber: phone,
+        whatsappNumber: l.phone,
         templateName: WA_TEMPLATES.WA5,
         parameters: nativeDoc
           ? [{ name: "1", value: ctx.firstName }]
@@ -189,152 +253,200 @@ async function confirmRow(table: Table, row: SheetRow): Promise<{ regId: string;
             ? { paramName: env.watiDocParam(), url: ctx.passUrl }
             : undefined,
       });
+      sent.push("WA-5");
     } catch (e) {
-      console.error(`[confirm] WA-5 failed for row ${row.rowNumber}:`, e);
+      failed.push("WA-5");
+      console.error(`[confirm] WA-5 failed for ${l.leadId}:`, e);
     }
   }
-  // EM-1 with the generated pass
-  if (email) {
+  if (l.email) {
     try {
-      const pass = await generatePassBase64({ name, company, regId });
-      const { subject, html } = emailFor("EM5", ctx); // confirmation + pass
+      const pass = await generatePassBase64({
+        name: l.name || "Guest",
+        company: l.company,
+        regId,
+      });
+      const { subject, html } = emailFor("EM5", ctx);
       await sendMail({
-        to: email,
+        to: l.email,
         subject,
         html,
         attachments: [
           {
-            name: `Event_Pass_${firstNameOf(name)}.pdf`,
+            name: `Event_Pass_${firstNameOf(l.name)}.pdf`,
             contentBytes: pass,
             contentType: "application/pdf",
           },
         ],
       });
+      sent.push("EM-5 (+pass)");
     } catch (e) {
-      console.error(`[confirm] EM-1 failed for row ${row.rowNumber}:`, e);
+      failed.push("EM-5");
+      console.error(`[confirm] EM-5 failed for ${l.leadId}:`, e);
     }
   }
 
   await notifySlack(
-    `:tada: *Booking confirmed* — ${name}${company ? ` (${company})` : ""} · Reg ID ${regId}`,
+    `:tada: *Booking confirmed* — ${l.name || "Guest"}${l.company ? ` (${l.company})` : ""} · Reg ID ${regId}` +
+      (sent.length ? ` · sent ${sent.join(" + ")}` : "") +
+      (failed.length ? ` · :warning: failed ${failed.join(", ")}` : ""),
   );
-  return { regId, name };
+  return { regId, name: l.name || "Guest" };
 }
 
-// ---- Reminders: booked lead, EM-2/3/4 (+ optional WA reminders) ----
-async function remindLead(table: Table, row: SheetRow): Promise<number> {
-  const sentCsv = cell(table, row, C.remindersSent);
+// ---- Reminders: EM-6/7/8 + WA-6/7/8 ----
+async function remindLead(auto: Table, row: SheetRow): Promise<number> {
+  const sentCsv = cell(auto, row, A.remindersSent);
   const due = dueReminders(sentCsv);
   if (!due.length) return 0;
-  const token = cell(table, row, C.token);
-  const regId = cell(table, row, C.regId);
-  const ctx = { ...ctxFor(table, row, token), regId: regId || undefined };
-  const email = cell(table, row, C.email);
-  const phone = cell(table, row, C.phone);
-  const company = cell(table, row, C.company) || "";
-  const name = cell(table, row, C.fullName) || "Guest";
 
-  const sent = new Set(sentCsv.split(",").map((s) => s.trim()).filter(Boolean));
-  let count = 0;
+  const l = leadFromAuto(auto, row);
+  const token = cell(auto, row, A.token);
+  const ctx = ctxFor(l, token);
+  const already = new Set(
+    sentCsv.split(",").map((s) => s.trim()).filter(Boolean),
+  );
+  const justSent: string[] = [];
+  const failed: string[] = [];
 
   for (const r of due) {
     try {
       if (r.kind === "email") {
+        if (!l.email) continue;
         const kind = r.key === "EM6" ? "EM6" : r.key === "EM7" ? "EM7" : "EM8";
         const { subject, html } = emailFor(kind, ctx);
-        const attachments = regId
+        const attachments = l.regId
           ? [
               {
-                name: `Event_Pass_${firstNameOf(name)}.pdf`,
-                contentBytes: await generatePassBase64({ name, company, regId }),
+                name: `Event_Pass_${firstNameOf(l.name)}.pdf`,
+                contentBytes: await generatePassBase64({
+                  name: l.name || "Guest",
+                  company: l.company,
+                  regId: l.regId,
+                }),
                 contentType: "application/pdf",
               },
             ]
           : undefined;
-        if (email) await sendMail({ to: email, subject, html, attachments });
-      } else if (r.kind === "wa") {
+        await sendMail({ to: l.email, subject, html, attachments });
+      } else {
+        if (!l.phone) continue;
         const tpl =
           r.key === "WA6"
             ? WA_TEMPLATES.WA6
             : r.key === "WA7"
               ? WA_TEMPLATES.WA7
               : WA_TEMPLATES.WA8;
-        if (phone) {
-          await sendTemplate({
-            whatsappNumber: phone,
-            templateName: tpl,
-            parameters: waParamsFor(tpl, ctx),
-          });
-        }
+        await sendTemplate({
+          whatsappNumber: l.phone,
+          templateName: tpl,
+          parameters: waParamsFor(tpl, ctx),
+        });
       }
-      sent.add(r.key);
-      count++;
+      already.add(r.key);
+      justSent.push(r.key);
     } catch (e) {
-      console.error(`[remind] ${r.key} failed for row ${row.rowNumber}:`, e);
+      failed.push(r.key);
+      console.error(`[remind] ${r.key} failed for ${l.leadId}:`, e);
     }
   }
 
-  if (count) {
-    await updateRow(row.rowNumber, table, {
-      [C.remindersSent]: Array.from(sent).join(","),
+  if (justSent.length) {
+    await updateRow(auto, row.rowNumber, {
+      [A.remindersSent]: Array.from(already).join(","),
     });
   }
-  return count;
+  if (justSent.length || failed.length) {
+    await notifySlack(
+      `:alarm_clock: *Reminder* — ${l.name || "Guest"}` +
+        (justSent.length ? ` · sent ${justSent.join(" + ")}` : "") +
+        (failed.length ? ` · :warning: failed ${failed.join(", ")}` : ""),
+    );
+  }
+  return justSent.length;
 }
 
 export interface TickSummary {
   ingested: number;
   nurtured: number;
   remindersSent: number;
-  scanned: number;
+  formRows: number;
+  automationRows: number;
   errors: string[];
 }
 
 // The hourly tick — the whole scheduled engine.
 export async function runTick(): Promise<TickSummary> {
-  const table = await readTable();
+  const [form, auto] = await Promise.all([
+    readTable(env.formTab()),
+    readTable(env.autoTab()),
+  ]);
+
   const summary: TickSummary = {
     ingested: 0,
     nurtured: 0,
     remindersSent: 0,
-    scanned: table.rows.length,
+    formRows: form.rows.length,
+    automationRows: auto.rows.length,
     errors: [],
   };
-  const quiet = isQuietHours();
 
-  for (const row of table.rows) {
-    const email = cell(table, row, C.email);
-    const phone = cell(table, row, C.phone);
-    if (!email && !phone) continue; // empty row
-    if (isTestLead(table, row)) continue;
+  // Resolve the form's column names (they differ from ours, e.g. "your_name:").
+  const cId = resolveHeader(form, FORM.id);
+  const cName = resolveHeader(form, FORM.name);
+  const cEmail = resolveHeader(form, FORM.email);
+  const cPhone = resolveHeader(form, FORM.phone);
+  const cCompany = resolveHeader(form, FORM.company);
 
-    const done = isDone(cell(table, row, C.done));
-    const token = cell(table, row, C.token);
+  const known = new Set(
+    auto.rows.map((r) => cell(auto, r, A.leadId)).filter(Boolean),
+  );
 
+  // 1) INGEST — form rows we haven't seen before.
+  for (const fr of form.rows) {
+    const leadId = cId ? cell(form, fr, cId) : "";
+    if (!leadId || known.has(leadId)) continue;
+    const l: LeadData = {
+      leadId,
+      name: cName ? cell(form, fr, cName) : "",
+      email: cEmail ? cell(form, fr, cEmail) : "",
+      phone: cPhone ? cell(form, fr, cPhone) : "",
+      company: cCompany ? cell(form, fr, cCompany) : "",
+    };
+    if (!l.email && !l.phone) continue;
+    if (isTestLead(l)) continue;
     try {
-      if (done) {
-        // Booked → reminders only.
-        summary.remindersSent += await remindLead(table, row);
-      } else if (!token) {
-        // Brand-new lead → ingest (send WA-1 + EM-0a) regardless of quiet hours,
-        // since this is the immediate acknowledgement of their submission.
-        await ingestLead(table, row);
-        summary.ingested++;
-      } else if (!quiet && dueForNurture(cell(table, row, C.lastNudge))) {
-        await nurtureLead(table, row);
-        summary.nurtured++;
-      }
+      await ingestLead(auto, l, "meta_form");
+      known.add(leadId);
+      summary.ingested++;
     } catch (e) {
-      const msg = `row ${row.rowNumber}: ${(e as Error).message}`;
+      const msg = `ingest ${leadId}: ${(e as Error).message}`;
       summary.errors.push(msg);
       console.error("[tick]", msg);
     }
   }
 
-  if (summary.ingested || summary.errors.length) {
+  // 2) NURTURE + REMINDERS — on existing automation rows.
+  const quiet = isQuietHours();
+  for (const ar of auto.rows) {
+    if (!cell(auto, ar, A.token)) continue; // not an active lead row
+    try {
+      if (isDone(cell(auto, ar, A.done))) {
+        summary.remindersSent += await remindLead(auto, ar);
+      } else if (!quiet && dueForNurture(cell(auto, ar, A.lastNudge))) {
+        await nurtureLead(auto, ar);
+        summary.nurtured++;
+      }
+    } catch (e) {
+      const msg = `row ${ar.rowNumber}: ${(e as Error).message}`;
+      summary.errors.push(msg);
+      console.error("[tick]", msg);
+    }
+  }
+
+  if (summary.errors.length) {
     await notifySlack(
-      `:gear: Tick — ingested ${summary.ingested}, nurtured ${summary.nurtured}, reminders ${summary.remindersSent}` +
-        (summary.errors.length ? `, *${summary.errors.length} errors*` : ""),
+      `:rotating_light: Tick finished with *${summary.errors.length} error(s)* — ${summary.errors[0]}`,
     );
   }
   return summary;
@@ -345,13 +457,18 @@ export async function runTick(): Promise<TickSummary> {
 export async function confirmByToken(
   token: string,
 ): Promise<{ ok: boolean; already?: boolean; name?: string; regId?: string; error?: string }> {
-  const table = await readTable();
-  const row = table.rows.find((r) => cell(table, r, C.token) === token);
+  const auto = await readTable(env.autoTab());
+  const row = auto.rows.find((r) => cell(auto, r, A.token) === token);
   if (!row) return { ok: false, error: "not_found" };
-  if (isDone(cell(table, row, C.done))) {
-    return { ok: true, already: true, name: cell(table, row, C.fullName), regId: cell(table, row, C.regId) };
+  if (isDone(cell(auto, row, A.done))) {
+    return {
+      ok: true,
+      already: true,
+      name: cell(auto, row, A.name),
+      regId: cell(auto, row, A.regId),
+    };
   }
-  const { regId, name } = await confirmRow(table, row);
+  const { regId, name } = await confirmRow(auto, row);
   return { ok: true, name, regId };
 }
 
@@ -361,51 +478,59 @@ export async function confirmOrganic(input: {
   phone: string;
   company?: string;
 }): Promise<{ ok: boolean; name: string; regId?: string; error?: string }> {
-  const table = await readTable();
-  // De-dupe: if this email/phone already exists, confirm that row instead.
-  const existing = table.rows.find(
+  const auto = await readTable(env.autoTab());
+  const digits = (s: string) => s.replace(/\D/g, "");
+
+  // De-dupe: same email or phone already tracked → confirm that row.
+  const existing = auto.rows.find(
     (r) =>
-      (input.email && cell(table, r, C.email).toLowerCase() === input.email.toLowerCase()) ||
-      (input.phone && cell(table, r, C.phone).replace(/\D/g, "") === input.phone.replace(/\D/g, "")),
+      (input.email &&
+        cell(auto, r, A.email).toLowerCase() === input.email.toLowerCase()) ||
+      (input.phone && digits(cell(auto, r, A.phone)) === digits(input.phone)),
   );
   if (existing) {
-    if (isDone(cell(table, existing, C.done))) {
-      return { ok: true, name: cell(table, existing, C.fullName), regId: cell(table, existing, C.regId) };
+    if (isDone(cell(auto, existing, A.done))) {
+      return {
+        ok: true,
+        name: cell(auto, existing, A.name),
+        regId: cell(auto, existing, A.regId),
+      };
     }
-    const { regId, name } = await confirmRow(table, existing);
+    const { regId, name } = await confirmRow(auto, existing);
     return { ok: true, name, regId };
   }
 
   const token = genToken();
-  const rowNumber = await appendRow(table, {
-    [C.fullName]: input.name,
-    [C.email]: input.email,
-    [C.phone]: input.phone,
-    [C.company]: input.company ?? "",
-    [C.token]: token,
-    is_organic: "true",
-    lead_status: "Organic",
+  await appendRow(auto, {
+    [A.leadId]: `organic-${token.slice(0, 10)}`,
+    [A.name]: input.name,
+    [A.email]: input.email,
+    [A.phone]: input.phone,
+    [A.company]: input.company ?? "",
+    [A.token]: token,
+    [A.nurtureStage]: "0",
+    [A.lastNudge]: nowIso(),
+    [A.source]: "organic",
   });
-  // Re-read so the new row is in the table for confirmRow.
-  const table2 = await readTable();
-  const row = table2.rows.find((r) => r.rowNumber === rowNumber) ??
-    table2.rows.find((r) => cell(table2, r, C.token) === token);
+
+  const auto2 = await readTable(env.autoTab());
+  const row = auto2.rows.find((r) => cell(auto2, r, A.token) === token);
   if (!row) return { ok: false, name: input.name, error: "append_failed" };
-  const { regId, name } = await confirmRow(table2, row);
+  const { regId, name } = await confirmRow(auto2, row);
   return { ok: true, name, regId };
 }
 
-// Regenerate the pass PDF for a token (powers GET /api/pass + WhatsApp link).
+// Regenerate the pass PDF for a token (powers GET /api/pass).
 export async function passPdfForToken(
   token: string,
 ): Promise<{ bytes: Uint8Array; filename: string } | null> {
-  const table = await readTable();
-  const row = table.rows.find((r) => cell(table, r, C.token) === token);
+  const auto = await readTable(env.autoTab());
+  const row = auto.rows.find((r) => cell(auto, r, A.token) === token);
   if (!row) return null;
-  const regId = cell(table, row, C.regId);
-  if (!regId) return null; // pass not issued until the booking is confirmed
-  const name = cell(table, row, C.fullName) || "Guest";
-  const company = cell(table, row, C.company) || "";
+  const regId = cell(auto, row, A.regId);
+  if (!regId) return null; // pass not issued until confirmed
+  const name = cell(auto, row, A.name) || "Guest";
+  const company = cell(auto, row, A.company);
   const bytes = await generatePass({ name, company, regId });
   return { bytes, filename: `Event_Pass_${firstNameOf(name)}.pdf` };
 }

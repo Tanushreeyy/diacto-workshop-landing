@@ -1,5 +1,7 @@
 // Google Sheets access via a service account (read + write proven live).
 // Uses google-auth-library for RS256/JWT auth and the Sheets REST API for I/O.
+// All functions are tab-scoped: the Meta form tab is read-only, booking state
+// lives in the automation tab.
 
 import { JWT } from "google-auth-library";
 import { env } from "./env";
@@ -35,6 +37,7 @@ export interface SheetRow {
 }
 
 export interface Table {
+  tab: string;
   header: string[];
   index: Record<string, number>; // header name -> 0-based column
   rows: SheetRow[];
@@ -45,8 +48,18 @@ export function cell(table: Table, row: SheetRow, header: string): string {
   return i === undefined ? "" : row.cells[i] ?? "";
 }
 
-export async function readTable(): Promise<Table> {
-  const tab = env.sheetTab();
+// Find the real header name from a list of candidates (case/space tolerant).
+// Lets us survive the form's odd column names ("your_name:") and any renames.
+export function resolveHeader(table: Table, candidates: string[]): string | null {
+  const lower = new Map(table.header.map((h) => [h.trim().toLowerCase(), h]));
+  for (const c of candidates) {
+    const hit = lower.get(c.trim().toLowerCase());
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export async function readTable(tab: string): Promise<Table> {
   const res = await jwt().request<{ values?: string[][] }>({
     url: `${API}/${env.sheetId()}/values/${encodeURIComponent(tab)}!A1:AZ`,
   });
@@ -57,20 +70,19 @@ export async function readTable(): Promise<Table> {
   const rows: SheetRow[] = values
     .slice(1)
     .map((cells, i) => ({ rowNumber: i + 2, cells }));
-  return { header, index, rows };
+  return { tab, header, index, rows };
 }
 
-// Update named columns on a specific sheet row.
+// Update named columns on a specific row of the table's tab.
 export async function updateRow(
-  rowNumber: number,
   table: Table,
+  rowNumber: number,
   updates: Record<string, string>,
 ): Promise<void> {
-  const tab = env.sheetTab();
   const data = Object.entries(updates)
     .filter(([k]) => k in table.index)
     .map(([k, v]) => ({
-      range: `${tab}!${colLetter(table.index[k])}${rowNumber}`,
+      range: `${table.tab}!${colLetter(table.index[k])}${rowNumber}`,
       values: [[v]],
     }));
   if (!data.length) return;
@@ -81,15 +93,14 @@ export async function updateRow(
   });
 }
 
-// Append a new lead row keyed by header name; returns its 1-based row number.
+// Append a row keyed by header name; returns its 1-based row number.
 export async function appendRow(
   table: Table,
   values: Record<string, string>,
 ): Promise<number> {
-  const tab = env.sheetTab();
   const row = table.header.map((h) => values[h] ?? "");
   const res = await jwt().request<{ updates?: { updatedRange?: string } }>({
-    url: `${API}/${env.sheetId()}/values/${encodeURIComponent(tab)}!A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    url: `${API}/${env.sheetId()}/values/${encodeURIComponent(table.tab)}!A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     method: "POST",
     data: { values: [row] },
   });
