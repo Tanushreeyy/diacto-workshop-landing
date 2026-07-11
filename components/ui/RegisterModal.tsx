@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 interface Props {
   rid: string | null;
   onClose: () => void;
-  onRegistered: (name: string, regId: string, already: boolean, passUrl?: string) => void;
+  onRegistered: () => void;
 }
 
 const EMPLOYEE_COUNTS = ["1-10", "11-50", "51-200", "201-500", "500+"];
@@ -30,7 +30,7 @@ const EMPTY: Fields = {
   email: "",
 };
 
-type Step = "loading" | "phone" | "form" | "already";
+type Step = "loading" | "phone" | "form" | "already" | "success";
 
 /**
  * Registration.
@@ -54,6 +54,7 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
   const [phoneInput, setPhoneInput] = useState("");
   const [known, setKnown] = useState(false);
   const [already, setAlready] = useState<{ regId: string; passUrl?: string } | null>(null);
+  const [success, setSuccess] = useState<{ name: string; regId: string; passUrl?: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const firstRef = useRef<HTMLInputElement>(null);
@@ -167,8 +168,11 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
         body: JSON.stringify({ ...f, rid: rid ?? undefined }),
       });
       const d = await res.json();
-      if (d.ok) onRegistered(d.name || f.name, d.regId || "", !!d.already, d.passUrl);
-      else if (d.error === "bad_email") setErr("Please enter a valid email address.");
+      if (d.ok) {
+        setSuccess({ name: d.name || f.name, regId: d.regId || "", passUrl: d.passUrl });
+        setStep(d.already ? "already" : "success");
+        onRegistered();
+      } else if (d.error === "bad_email") setErr("Please enter a valid email address.");
       else if (d.error === "bad_phone") setErr("Please enter a valid phone number.");
       else setErr("Something went wrong. Please try again.");
     } catch {
@@ -220,6 +224,40 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
               {already?.passUrl && (
                 <a
                   href={already.passUrl}
+                  className="rounded-full bg-brand-gold px-5 py-3 font-sans font-semibold text-brand-black transition hover:bg-brand-gold-light"
+                >
+                  📎 Download your Event Pass
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-full border border-black/15 px-5 py-2.5 font-sans text-sm text-brand-charcoal"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === "success" && (
+          <div className="text-center">
+            <h3 className="font-serif text-2xl font-bold text-brand-black">
+              🎉 You&apos;re in{success?.name ? `, ${success.name.split(" ")[0]}` : ""}!
+            </h3>
+            <p className="mt-2 font-sans text-sm text-brand-charcoal/70">
+              Your seat is confirmed. We&apos;ve sent your Event Pass to your
+              WhatsApp &amp; email.
+            </p>
+            {success?.regId && (
+              <p className="mt-3 font-sans text-sm text-brand-black">
+                Registration ID: <b>{success.regId}</b>
+              </p>
+            )}
+            <div className="mt-5 flex flex-col gap-2">
+              {success?.passUrl && (
+                <a
+                  href={success.passUrl}
                   className="rounded-full bg-brand-gold px-5 py-3 font-sans font-semibold text-brand-black transition hover:bg-brand-gold-light"
                 >
                   📎 Download your Event Pass

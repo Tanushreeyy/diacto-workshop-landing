@@ -12,19 +12,15 @@ interface Props {
 }
 
 /**
- * The booking CTA. Opens the registration modal — submitting it registers the
- * person outright (sheet row + Event Pass on WhatsApp & email). There is no
- * pending state and no OTP step.
+ * The booking CTA — used by the header, hero, final CTA and the mobile sticky bar.
+ * Every instance opens the same centered modal; the confirmation is shown INSIDE
+ * that modal (not inline), so this button never changes size and can safely live
+ * in the 64px navbar.
  */
 export default function BookButton({ className = "", children, tabIndex }: Props) {
   const [open, setOpen] = useState(false);
   const [rid, setRid] = useState<string | null>(null);
-  const [done, setDone] = useState<{
-    name: string;
-    regId: string;
-    already: boolean;
-    passUrl?: string;
-  } | null>(null);
+  const [registered, setRegistered] = useState(false);
 
   // Arrived from our WhatsApp/email link? Then we can identify them outright.
   useEffect(() => {
@@ -39,34 +35,6 @@ export default function BookButton({ className = "", children, tabIndex }: Props
     "focus-visible:ring-2 focus-visible:ring-brand-gold focus-visible:ring-offset-2 " +
     className;
 
-  if (done) {
-    return (
-      <div className="rounded-2xl border border-brand-gold/40 bg-brand-gold/10 px-6 py-4 text-center">
-        <p className="font-sans font-semibold text-brand-gold">
-          🎉 {done.name ? `${done.name}, your` : "Your"} seat is confirmed!
-        </p>
-        <p className="mt-1 font-sans text-sm text-white/80">
-          {done.already
-            ? "You're already registered — see you there!"
-            : "Your Event Pass is on its way to your WhatsApp & email."}
-        </p>
-        {done.regId && (
-          <p className="mt-1 font-sans text-xs text-white/60">
-            Registration ID: {done.regId}
-          </p>
-        )}
-        {done.passUrl && (
-          <a
-            href={done.passUrl}
-            className="mt-3 inline-block rounded-full bg-brand-gold px-5 py-2 font-sans text-sm font-semibold text-brand-black transition hover:bg-brand-gold-light"
-          >
-            📎 Download your Event Pass
-          </a>
-        )}
-      </div>
-    );
-  }
-
   return (
     <>
       <button
@@ -75,16 +43,13 @@ export default function BookButton({ className = "", children, tabIndex }: Props
         tabIndex={tabIndex}
         className={pill}
       >
-        {children ?? EVENT.ctaText}
+        {registered ? "✓ YOU'RE REGISTERED" : (children ?? EVENT.ctaText)}
       </button>
       {open && (
         <RegisterModal
           rid={rid}
           onClose={() => setOpen(false)}
-          onRegistered={(name, regId, already, passUrl) => {
-            setOpen(false);
-            setDone({ name, regId, already, passUrl });
-          }}
+          onRegistered={() => setRegistered(true)}
         />
       )}
     </>

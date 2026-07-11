@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import Button from "./Button";
+import BookButton from "./BookButton";
 import { EVENT } from "@/lib/event";
 
 /**
@@ -42,14 +42,9 @@ export default function Header() {
           />
         </Link>
 
-        {/* BACKEND INTEGRATION: booking workflow attaches to this CTA */}
-        <Button
-          href="#book"
-          variant="primary"
-          className="h-9 !min-h-0 !px-4 text-xs sm:h-10 sm:!px-6 sm:text-sm"
-        >
+        <BookButton className="h-9 !min-h-0 !px-4 text-xs sm:h-10 sm:!px-6 sm:text-sm">
           {EVENT.ctaText}
-        </Button>
+        </BookButton>
       </div>
     </header>
   );
