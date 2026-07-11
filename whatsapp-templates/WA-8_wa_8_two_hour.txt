@@ -1,0 +1,21 @@
+Template name : wa_8_two_hour
+Category      : Utility
+Language      : English (en)
+
+────────── HEADER  (type: Text) ──────────
+🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
+
+────────── BODY ──────────
+Hi {{1}}, the High-Performance Teams Workshop goes live in 2 hours! ⏳ 3:00 PM sharp, Prabhavee Tech Park, Baner.
+📎 Your Event Pass: {{2}}
+Show it at check-in. Need help? Call +91 7387731069. Tap “Get Directions” below. 🚀
+
+────────── FOOTER ──────────
+Diacto Technologies
+
+────────── VARIABLES / SAMPLE VALUES ──────────
+  {{1}} = First name           sample: Priya
+  {{2}} = Event Pass link      sample: https://diacto-workshop.example.com/api/pass?rid=abc123
+
+────────── BUTTONS ──────────
+[URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

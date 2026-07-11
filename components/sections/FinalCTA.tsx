@@ -1,4 +1,4 @@
-import Button from "@/components/ui/Button";
+import BookButton from "@/components/ui/BookButton";
 import Reveal from "@/components/ui/Reveal";
 import EventChips from "@/components/ui/EventChips";
 import { EVENT } from "@/lib/event";
@@ -41,14 +41,9 @@ export default function FinalCTA() {
 
         <Reveal delay={200}>
           <div className="mt-8">
-            {/* BACKEND INTEGRATION: booking workflow attaches to this CTA */}
-            <Button
-              href="#book"
-              variant="primary"
-              className="text-base md:text-lg md:min-h-[56px] md:px-10"
-            >
+            <BookButton className="text-base md:text-lg md:min-h-[56px] md:px-10">
               {EVENT.ctaText}
-            </Button>
+            </BookButton>
           </div>
         </Reveal>
 

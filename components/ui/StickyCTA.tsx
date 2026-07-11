@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Button from "./Button";
+import BookButton from "./BookButton";
 import { EVENT } from "@/lib/event";
 
 /**
@@ -45,15 +45,9 @@ export default function StickyCTA() {
       aria-label="Book your spot"
       aria-hidden={!visible}
     >
-      {/* BACKEND INTEGRATION: booking CTA connects to booking workflow later. */}
-      <Button
-        href="#book"
-        variant="primary"
-        className="w-full"
-        tabIndex={visible ? undefined : -1}
-      >
+      <BookButton className="w-full" tabIndex={visible ? undefined : -1}>
         {EVENT.ctaText}
-      </Button>
+      </BookButton>
     </div>
   );
 }

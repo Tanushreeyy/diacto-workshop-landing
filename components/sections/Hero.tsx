@@ -1,4 +1,4 @@
-import Button from "@/components/ui/Button";
+import BookButton from "@/components/ui/BookButton";
 import Reveal from "@/components/ui/Reveal";
 import EventChips from "@/components/ui/EventChips";
 import { EVENT } from "@/lib/event";
@@ -102,10 +102,7 @@ export default function Hero() {
             delay={300}
             className="text-center lg:col-start-1 lg:row-start-4 lg:text-left"
           >
-            {/* BACKEND INTEGRATION: booking workflow attaches to this CTA */}
-            <Button href="#book" variant="primary" className="h-12">
-              {EVENT.ctaText}
-            </Button>
+            <BookButton className="h-12">{EVENT.ctaText}</BookButton>
             <p className="mt-4 font-sans text-sm text-white/60">
               Limited seats · Free to attend
             </p>
