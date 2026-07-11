@@ -1,0 +1,33 @@
+# One command to run the whole thing: `docker compose up -d`
+#
+#   app  — the landing page + booking API
+#   cron — calls /api/cron/tick every 5 minutes (ingest, nurture, reminders)
+#
+# The cron service means you do NOT need a scheduler on the host. If you already
+# have one (k8s CronJob, systemd timer, an external pinger), delete the `cron`
+# service and point yours at POST /api/cron/tick with the Authorization header.
+
+services:
+  app:
+    build: .
+    image: diacto-workshop:latest
+    env_file: .env.production
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  cron:
+    image: curlimages/curl:8.10.1
+    depends_on:
+      - app
+    env_file: .env.production
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          curl -fsS -m 120 -X POST \
+            -H "Authorization: Bearer $${CRON_SECRET}" \
+            http://app:3000/api/cron/tick || echo "tick failed"
+          sleep 300
+        done

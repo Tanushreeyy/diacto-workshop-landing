@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.env*
+!.env.example
+npm-debug.log*
+README*.md
+SELF-HOSTING.md
+whatsapp-templates
+email-templates
+scripts/create-wa-templates.mjs
+scripts/export-wa-templates.mjs
