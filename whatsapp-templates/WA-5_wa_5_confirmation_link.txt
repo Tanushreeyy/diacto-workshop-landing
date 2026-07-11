@@ -1,4 +1,4 @@
-Template name : wa_5_confirmation_dynamic
+Template name : wa_5_confirmation_link
 Category      : Utility
 Language      : English (en)
 

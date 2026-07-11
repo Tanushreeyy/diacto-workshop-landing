@@ -22,7 +22,7 @@ export const WA_TEMPLATES = {
   WA2: process.env.WATI_TPL_WA2 || "wa_2_value_nudge",
   WA3: process.env.WATI_TPL_WA3 || "wa_3_problem_nudge",
   WA4: process.env.WATI_TPL_WA4 || "wa_4_urgency_nudge",
-  WA5: process.env.WATI_TPL_WA5 || "wa_5_confirmation_dynamic",
+  WA5: process.env.WATI_TPL_WA5 || "wa_5_confirmation_link",
   WA6: process.env.WATI_TPL_WA6 || "wa_6_day_before",
   WA7: process.env.WATI_TPL_WA7 || "wa_7_morning_of",
   WA8: process.env.WATI_TPL_WA8 || "wa_8_two_hour",

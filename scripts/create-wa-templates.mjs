@@ -89,7 +89,7 @@ export const TEMPLATES = [
     // Text header + tap-to-download pass link. (Native document attachment needs
     // a dynamic media header, which WATI's builder does not currently accept —
     // it validates the header field as a real URL and rejects a {{variable}}.)
-    name: "wa_5_confirmation_dynamic",
+    name: "wa_5_confirmation_link",
     category: "UTILITY",
     labels: V_PASS,
     example: [EX_NAME, EX_PASS],
