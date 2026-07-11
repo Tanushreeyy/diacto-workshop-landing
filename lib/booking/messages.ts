@@ -21,7 +21,7 @@ export interface MsgCtx {
   support: string;
 }
 
-const UNSUBSCRIBE_LINK = "mailto:workshop@diacto.com?subject=Unsubscribe%20-%20Workshop";
+const UNSUBSCRIBE_LINK = `mailto:${WORKSHOP.unsubscribeEmail}?subject=Unsubscribe%20-%20Workshop`;
 
 // Render a designed email template with this lead's values.
 export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: string } {
