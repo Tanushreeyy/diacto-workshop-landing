@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 interface Props {
   rid: string | null;
@@ -41,6 +42,13 @@ type Step = "loading" | "phone" | "form" | "already";
  * pass sent to a dead inbox is worse than no pass.
  */
 export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
+  // Portalled to <body>. The CTA lives inside <Reveal>, which sets
+  // `transform` + `will-change` — either of those makes an ancestor the
+  // containing block for position:fixed, which would pin this modal inside the
+  // hero instead of the viewport. The portal escapes that entirely.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const [step, setStep] = useState<Step>(rid ? "loading" : "phone");
   const [f, setF] = useState<Fields>(EMPTY);
   const [phoneInput, setPhoneInput] = useState("");
@@ -175,9 +183,11 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
     "text-brand-black outline-none transition focus:border-brand-gold focus:ring-2 focus:ring-brand-gold/30";
   const label = "mb-1 block font-sans text-xs font-semibold text-brand-charcoal";
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label="Register for the workshop"
@@ -340,6 +350,7 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
