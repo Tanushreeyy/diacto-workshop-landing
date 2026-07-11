@@ -100,9 +100,18 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rid }),
         });
-        applyLookup(await res.json());
+        const data = await res.json();
+        // Unknown token — a link truncated by WhatsApp, a bad copy-paste, a stale
+        // one, or someone typing nonsense. Don't strand them on a blank 7-field
+        // form: fall back to the phone step so a genuine lead can still be
+        // matched and prefilled from one field they already know by heart.
+        if (!data?.found) {
+          setStep("phone");
+          return;
+        }
+        applyLookup(data);
       } catch {
-        setStep("form");
+        setStep("phone");
       }
     })();
   }, [rid, applyLookup]);
