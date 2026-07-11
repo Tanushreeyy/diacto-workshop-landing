@@ -1,21 +1,22 @@
-Template name : wa_5_confirmation
+Template name : wa_5_confirmation_dynamic
 Category      : Utility
 Language      : English (en)
 
-────────── HEADER  (type: Document / Media) ──────────
-Upload a sample Event Pass PDF here in WATI. At send time, each attendee's
-own pass is attached automatically (per-recipient media).
+────────── HEADER  (type: Text) ──────────
+🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
 
 ────────── BODY ──────────
 🎉 Congratulations {{1}}! Your seat for the High-Performance Teams Workshop is CONFIRMED.
 🗓 Fri, 17 July  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune
-Your Event Pass is attached above 📎 — carry it (digital or print) for entry. Our team will call you shortly. Tap “Get Directions” below. See you there! 🚀
+📎 Your Event Pass: {{2}}
+Also emailed to you — carry it (digital or print) for entry. Tap “Get Directions” below. See you there! 🚀
 
 ────────── FOOTER ──────────
 Diacto Technologies
 
 ────────── VARIABLES / SAMPLE VALUES ──────────
   {{1}} = First name           sample: Priya
+  {{2}} = Event Pass link      sample: https://diacto-workshop.example.com/api/pass?rid=abc123
 
 ────────── BUTTONS ──────────
 [URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

@@ -40,8 +40,9 @@ export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: 
 // STATIC (a static "Get Directions" URL button + hardcoded text in the template),
 // so the only body variables are the first name and a dynamic link:
 //   WA-1…WA-4 : {{1}} first name · {{2}} booking link
-//   WA-5      : {{1}} first name  (pass is the DOCUMENT header, not a body var)
-//   WA-6…WA-8 : {{1}} first name · {{2}} Event Pass download link
+//   WA-5…WA-8 : {{1}} first name · {{2}} Event Pass download link
+// (In WA5_NATIVE_DOC mode, WA-5 instead sends {{1}} only + a document header —
+//  that path is built in service.ts, not here.)
 export function waParamsFor(templateName: string, ctx: MsgCtx): WaParam[] {
   const fn: WaParam = { name: "1", value: ctx.firstName };
   const bookingLink: WaParam = { name: "2", value: ctx.bookingLink };
@@ -53,9 +54,7 @@ export function waParamsFor(templateName: string, ctx: MsgCtx): WaParam[] {
     case WA_TEMPLATES.WA3:
     case WA_TEMPLATES.WA4:
       return [fn, bookingLink];
-    case WA_TEMPLATES.WA5:
-      return [fn];
     default:
-      return [fn, passLink]; // WA-6 / WA-7 / WA-8
+      return [fn, passLink]; // WA-5 / WA-6 / WA-7 / WA-8
   }
 }

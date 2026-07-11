@@ -19,9 +19,11 @@ TEMPLATES.forEach((t, i) => {
 
   const headerBlock =
     t.headerFormat === "DOCUMENT"
-      ? "────────── HEADER  (type: Document / Media) ──────────\n" +
-        "Upload a sample Event Pass PDF here in WATI. At send time, each attendee's\n" +
-        "own pass is attached automatically (per-recipient media)."
+      ? "────────── HEADER  (Media Type: Document — DYNAMIC) ──────────\n" +
+        `Header variable:  {{${t.headerVar}}}\n` +
+        `Sample value:     https://diacto-workshop.example.com/api/pass?rid=abc123\n` +
+        "Upload the sample Event Pass PDF only if WATI asks (Meta approval sample).\n" +
+        "Each attendee's own pass is injected at send time via this variable."
       : `────────── HEADER  (type: Text) ──────────\n${HEADER}`;
 
   const txt = `Template name : ${t.name}

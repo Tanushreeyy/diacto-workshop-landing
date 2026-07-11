@@ -32,7 +32,6 @@ const SAMPLE_DOC_HANDLE = process.env.META_SAMPLE_DOC_HANDLE || "";
 
 const V_BOOK = ["First name", "Booking link"];
 const V_PASS = ["First name", "Event Pass link"];
-const V_NAME = ["First name"];
 
 // name, category, variable labels, ordered example values, and body text.
 export const TEMPLATES = [
@@ -87,15 +86,18 @@ export const TEMPLATES = [
       "Don't let your seat be released. 👇",
   },
   {
-    name: "wa_5_confirmation",
+    // Text header + tap-to-download pass link. (Native document attachment needs
+    // a dynamic media header, which WATI's builder does not currently accept —
+    // it validates the header field as a real URL and rejects a {{variable}}.)
+    name: "wa_5_confirmation_dynamic",
     category: "UTILITY",
-    headerFormat: "DOCUMENT", // Event Pass PDF attached as the header
-    labels: V_NAME,
-    example: [EX_NAME],
+    labels: V_PASS,
+    example: [EX_NAME, EX_PASS],
     body:
       "🎉 Congratulations {{1}}! Your seat for the High-Performance Teams Workshop is CONFIRMED.\n" +
       "🗓 Fri, 17 July  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune\n" +
-      "Your Event Pass is attached above 📎 — carry it (digital or print) for entry. Our team will call you shortly. Tap “Get Directions” below. See you there! 🚀",
+      "📎 Your Event Pass: {{2}}\n" +
+      "Also emailed to you — carry it (digital or print) for entry. Tap “Get Directions” below. See you there! 🚀",
   },
   {
     name: "wa_6_day_before",

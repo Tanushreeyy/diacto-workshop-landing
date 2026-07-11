@@ -30,6 +30,12 @@ export const env = {
   watiToken: () => req("WATI_ACCESS_TOKEN"),
   // Name of the WA-5 document-header variable (must match the WATI template).
   watiDocParam: () => opt("WATI_WA5_DOC_PARAM", "pdfLink"),
+  // WA-5 delivery of the Event Pass:
+  //   false (default) → pass sent as a tap-to-download link in the body ({{2}})
+  //   true            → pass attached natively via a dynamic DOCUMENT header
+  // Native mode needs a WATI template whose media header is a real variable.
+  // WATI's UI currently rejects a {{var}} in the header URL, so default is off.
+  wa5NativeDoc: () => opt("WA5_NATIVE_DOC", "false") === "true",
 
   // Slack
   slackWebhook: () => opt("SLACK_WEBHOOK_URL"),

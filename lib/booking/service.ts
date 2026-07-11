@@ -172,16 +172,22 @@ async function confirmRow(table: Table, row: SheetRow): Promise<{ regId: string;
     [C.passSent]: nowIso(),
   });
 
-  // WA-5 confirmation — attaches the Event Pass PDF as a native document header.
+  // WA-5 confirmation. Default: the pass goes as a tap-to-download link in the
+  // body ({{2}}). With WA5_NATIVE_DOC=true it is attached natively via a dynamic
+  // DOCUMENT header instead (body is then {{1}}-only).
   if (phone) {
     try {
+      const nativeDoc = env.wa5NativeDoc();
       await sendTemplate({
         whatsappNumber: phone,
         templateName: WA_TEMPLATES.WA5,
-        parameters: waParamsFor(WA_TEMPLATES.WA5, ctx),
-        headerDocument: ctx.passUrl
-          ? { paramName: env.watiDocParam(), url: ctx.passUrl }
-          : undefined,
+        parameters: nativeDoc
+          ? [{ name: "1", value: ctx.firstName }]
+          : waParamsFor(WA_TEMPLATES.WA5, ctx),
+        headerDocument:
+          nativeDoc && ctx.passUrl
+            ? { paramName: env.watiDocParam(), url: ctx.passUrl }
+            : undefined,
       });
     } catch (e) {
       console.error(`[confirm] WA-5 failed for row ${row.rowNumber}:`, e);
