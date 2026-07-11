@@ -75,16 +75,48 @@ Get the token from Meta **Business Settings → System Users** (assign the Whats
 account asset). Works only if the WABA is in your Business Manager; otherwise
 create them in the WATI dashboard. Meta still reviews for approval either way.
 
-## Cron — pick one (the tick just needs to be called hourly)
+## Cron — one endpoint, called by an external scheduler
 
-The engine is `POST /api/cron/tick`, guarded by `CRON_SECRET`.
+The engine is **`POST /api/cron/tick`**, guarded by `CRON_SECRET`. It is the only
+endpoint that needs a cron. Everything time-related (10:00/17:00 IST nurture
+slots, quiet hours, reminder times) is decided **inside the app**, so the caller
+just knocks periodically — it needs no knowledge of the schedule. The tick is
+idempotent, so extra calls are harmless and missed calls self-heal.
 
-- **Vercel** (Pro): `vercel.json` already schedules it hourly; Vercel auto-sends
-  the `Authorization: Bearer $CRON_SECRET` header.
-- **VPS / Render / Railway / Fly** (free): run `npm run cron` under **pm2** or
-  **systemd** (`scripts/cron.mjs`, in-process `node-cron`).
-- **Any host, free external trigger**: point Cloudflare Workers Cron / GitHub
-  Actions / cron-job.org at the URL with the secret header.
+**Call it every 5–10 minutes** (not hourly): new leads then get their WA-1 + EM-1
+acknowledgement within minutes instead of up to an hour. Nurture/reminders still
+only fire when actually due.
+
+**Default: GitHub Actions** — `.github/workflows/cron-tick.yml` (already in the
+repo). Set two repo secrets under *Settings → Secrets and variables → Actions*:
+
+| Secret | Value |
+|---|---|
+| `TICK_URL` | `https://<your-domain>/api/cron/tick` |
+| `CRON_SECRET` | same value as the app's `CRON_SECRET` env var |
+
+> GitHub only runs scheduled workflows from the **default branch**, so this must
+> be merged to `main` before the schedule fires. Use **Run workflow** to test.
+> GitHub's scheduler is best-effort and can lag several minutes — fine here,
+> since the app catches up on the next tick.
+
+**Alternatives** (any one, same single call):
+- **cron-job.org / Cloudflare Workers Cron** — more punctual than GitHub; just
+  POST the URL with the `Authorization: Bearer <CRON_SECRET>` header.
+- **VPS / Render / Railway / Fly** — `npm run cron` (in-process `node-cron`,
+  `scripts/cron.mjs`) under **pm2** or **systemd**.
+- **Vercel Cron** — removed on purpose, to avoid double-firing alongside the
+  external caller. Re-add a `crons` block to `vercel.json` only if you drop the
+  external scheduler.
+
+```bash
+# what any of them do, once every 5 minutes:
+curl -fsS -X POST "$TICK_URL" -H "Authorization: Bearer $CRON_SECRET"
+```
+
+### The other endpoints are NOT cron — they're user-triggered
+- `POST /api/confirm` — the landing-page CTA (browser)
+- `GET /api/pass?rid=<token>` — the attendee tapping their pass link
 
 ## Testing
 
