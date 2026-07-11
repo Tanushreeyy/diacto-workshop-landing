@@ -497,10 +497,18 @@ export interface TickSummary {
   remindersSent: number;
   formRows: number;
   leads: number;
+  truncated: boolean; // hit the time budget — the next tick picks up the rest
   errors: string[];
 }
 
 export async function runTick(): Promise<TickSummary> {
+  // Deadline-bounded. Every unit of work is independently persisted, so stopping
+  // early is always safe: the next tick simply resumes. This is what keeps us
+  // inside a serverless function timeout no matter how many leads are queued.
+  const startedAt = Date.now();
+  const budgetMs = env.tickBudgetMs();
+  const outOfTime = () => Date.now() - startedAt > budgetMs;
+
   const [form, auto] = await Promise.all([
     readTable(env.formTab()).catch(() => null), // form tab may not exist yet
     readTable(env.autoTab()),
@@ -512,6 +520,7 @@ export async function runTick(): Promise<TickSummary> {
     remindersSent: 0,
     formRows: form?.rows.length ?? 0,
     leads: auto.rows.length,
+    truncated: false,
     errors: [],
   };
 
@@ -526,6 +535,7 @@ export async function runTick(): Promise<TickSummary> {
     const knownPhones = new Set(auto.rows.map((r) => cell(auto, r, A.phoneKey)).filter(Boolean));
 
     for (const fr of form.rows) {
+      if (outOfTime()) { summary.truncated = true; break; }
       const leadId = cId ? cell(form, fr, cId) : "";
       const name = cName ? cell(form, fr, cName) : "";
       const email = cEmail ? cell(form, fr, cEmail) : "";
@@ -547,6 +557,7 @@ export async function runTick(): Promise<TickSummary> {
   // 2) NURTURE (not yet registered) + REMINDERS (registered).
   const quiet = isQuietHours();
   for (const row of auto.rows) {
+    if (outOfTime()) { summary.truncated = true; break; }
     if (!cell(auto, row, A.token)) continue;
     try {
       if (isDone(cell(auto, row, A.done))) {

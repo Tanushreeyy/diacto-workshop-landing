@@ -44,5 +44,9 @@ export const env = {
 
   // Plumbing
   cronSecret: () => req("CRON_SECRET"),
+  // How long a single tick may spend doing work before it stops and leaves the
+  // rest for the next run. Keeps us under ANY host's function timeout (Netlify
+  // free ~10s, Vercel Hobby similar). Long-running hosts can raise it freely.
+  tickBudgetMs: () => parseInt(opt("TICK_BUDGET_MS", "8000"), 10) || 8000,
   landingBaseUrl: () => req("LANDING_BASE_URL").replace(/\/+$/, ""),
 };

@@ -1,0 +1,14 @@
+# Netlify (staging). The Next.js runtime turns each `ƒ` route in the build output
+# into a serverless function — without this the /api/* routes 404.
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Netlify free caps functions ~10s. The tick is deadline-bounded (TICK_BUDGET_MS)
+# and resumable, so it stops cleanly and the next run picks up the rest.
