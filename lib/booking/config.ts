@@ -28,8 +28,8 @@ export const WA_TEMPLATES = {
   WA8: process.env.WATI_TPL_WA8 || "wa_8_two_hour",
 } as const;
 
-// Nurture ladder for pending leads: WA-2 (touch 1) → WA-3 (touch 2) →
-// WA-4 (repeats twice daily until booked).
+// Nurture ladder for leads who haven't finished registering:
+// WA-2 (touch 1) → WA-3 (touch 2) → WA-4 (repeats twice daily until registered).
 export const WA_NURTURE_LADDER = [
   WA_TEMPLATES.WA2,
   WA_TEMPLATES.WA3,

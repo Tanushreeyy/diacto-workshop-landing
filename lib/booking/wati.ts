@@ -2,6 +2,7 @@
 // templates by name (create + approve them in the WATI dashboard first).
 
 import { env } from "./env";
+import { toWatiNumber } from "./phone";
 
 export interface WaParam {
   name: string; // matches the template variable name ("1", "2", … or named)
@@ -11,10 +12,7 @@ export interface WaParam {
 // Normalise an Indian/E.164 number to digits with country code, as WATI expects
 // (e.g. "917387731069"). Strips Meta test-lead "p:" prefixes and punctuation.
 export function normalizeWhatsApp(raw: string): string {
-  let d = (raw || "").replace(/^p:/i, "").replace(/[^\d]/g, "");
-  if (d.length === 10) d = "91" + d; // bare 10-digit Indian mobile
-  if (d.length === 11 && d.startsWith("0")) d = "91" + d.slice(1);
-  return d;
+  return toWatiNumber(raw);
 }
 
 export async function sendTemplate(opts: {

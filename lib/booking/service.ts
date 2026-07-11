@@ -1,11 +1,16 @@
 // Orchestration: the booking workflow.
 //
-// Two tabs:
-//   • form tab (v2_form)   — owned by Meta's connector. READ ONLY.
-//   • automation tab       — all our state, keyed by the form's `lead_id`.
-// Keeping state off the form tab means a form/connector change can never shift
-// or clobber booking state. Every operation is idempotent — the tick is safe to
-// run twice, and missed ticks self-heal on the next run.
+//   Meta Instant Form (name + phone + email)  →  form tab (connector-owned, READ ONLY)
+//        │  tick ingests → automation row + token → WA-1 + EM-1 (registration link)
+//        │
+//        ├─ taps our link      → landing ?rid=token → PREFILLED, fills 4 fields
+//        ├─ taps Meta's button → landing, enters phone → matched → fills 4 fields
+//        └─ never finishes     → WA-2/3/4 + EM-2/3/4 nurture, 10:00 & 17:00 IST
+//
+//   Registration (landing form) → WA-5 + EM-5 with the Event Pass → Slack
+//   Reminders                   → day before / morning of / 2h before
+//
+// All state lives in the `automation` tab; every operation is idempotent.
 
 import crypto from "crypto";
 import { env } from "./env";
@@ -25,43 +30,61 @@ import { notifySlack } from "./slack";
 import { generatePass, generatePassBase64 } from "./pass";
 import { emailFor, waParamsFor, MsgCtx } from "./messages";
 import { dueForNurture, dueReminders, isQuietHours, nowIso } from "./schedule";
+import { phoneKey, toE164, isValidPhone } from "./phone";
 
-// ---- automation tab columns (ours) ----
+// ---- automation tab (ours) ----
 const A = {
   leadId: "lead_id",
+  source: "source",
+  createdAt: "created_at",
   name: "name",
-  email: "email",
-  phone: "phone",
+  designation: "designation",
   company: "company",
+  location: "location",
+  employeeCount: "employee_count",
+  phone: "phone",
+  phoneKey: "phone_key",
+  email: "email",
   regId: "reg_id",
   token: "confirm_token",
   done: "registration_complete",
-  bookedAt: "booked_at",
+  registeredAt: "registered_at",
   nurtureStage: "nurture_stage",
   lastNudge: "last_nudge_at",
   passSent: "pass_sent_at",
   remindersSent: "reminders_sent",
-  source: "source",
 } as const;
 
-// ---- form tab columns (theirs) — resolved by candidate names ----
+// ---- form tab (Meta's) — resolved by candidate names ----
 const FORM = {
   id: ["id"],
-  name: ["your_name:", "full_name", "name"],
+  name: ["full_name", "your_name:", "name"],
   email: ["email", "email_address"],
   phone: ["phone", "phone_number"],
-  company: ["organization_name:", "company_name", "company"],
 };
 
 const isDone = (v: string) => (v || "").trim().toUpperCase() === "TRUE";
 
-interface LeadData {
-  leadId: string;
+export interface Prefill {
   name: string;
   email: string;
   phone: string;
+  designation: string;
   company: string;
+  location: string;
+  employeeCount: string;
+}
+
+export interface LookupResult {
+  found: boolean;
+  alreadyRegistered: boolean;
   regId?: string;
+  passUrl?: string;
+  prefill?: Prefill;
+}
+
+export interface RegistrationInput extends Prefill {
+  rid?: string;
 }
 
 function firstNameOf(fullName: string): string {
@@ -69,38 +92,24 @@ function firstNameOf(fullName: string): string {
   return n && !n.startsWith("<") ? n : "there";
 }
 
-function genToken(): string {
-  return crypto.randomBytes(18).toString("base64url");
-}
+const genToken = () => crypto.randomBytes(18).toString("base64url");
+const genRegId = () =>
+  `${WORKSHOP.regIdPrefix}-${WORKSHOP.eventMMDD}-${crypto
+    .randomInt(0, 10000)
+    .toString()
+    .padStart(4, "0")}`;
 
-function genRegId(): string {
-  const n = crypto.randomInt(0, 10000).toString().padStart(4, "0");
-  return `${WORKSHOP.regIdPrefix}-${WORKSHOP.eventMMDD}-${n}`;
-}
+export const registrationLink = (token: string) =>
+  `${env.landingBaseUrl()}/?rid=${encodeURIComponent(token)}`;
+const passUrl = (token: string) =>
+  `${env.landingBaseUrl()}/api/pass?rid=${encodeURIComponent(token)}`;
 
-export function bookingLink(token: string): string {
-  return `${env.landingBaseUrl()}/?rid=${encodeURIComponent(token)}`;
-}
-
-function passUrl(token: string): string {
-  return `${env.landingBaseUrl()}/api/pass?rid=${encodeURIComponent(token)}`;
-}
-
-// Skip Meta's dummy test leads so we never message placeholder data.
-function isTestLead(l: LeadData): boolean {
-  return (
-    l.email.toLowerCase() === "test@meta.com" ||
-    l.name.includes("<test") ||
-    l.phone.includes("<test")
-  );
-}
-
-function ctxFor(l: LeadData, token: string): MsgCtx {
+function ctxFor(name: string, token: string, regId?: string): MsgCtx {
   return {
-    firstName: firstNameOf(l.name),
-    bookingLink: bookingLink(token),
+    firstName: firstNameOf(name),
+    bookingLink: registrationLink(token),
     passUrl: passUrl(token),
-    regId: l.regId,
+    regId,
     dateLabel: WORKSHOP.dateLabel,
     timeLabel: WORKSHOP.timeLabel,
     venue: WORKSHOP.venue,
@@ -109,33 +118,72 @@ function ctxFor(l: LeadData, token: string): MsgCtx {
   };
 }
 
-function leadFromAuto(auto: Table, row: SheetRow): LeadData {
+function isTestLead(name: string, email: string, phone: string): boolean {
+  return (
+    email.toLowerCase() === "test@meta.com" ||
+    name.includes("<test") ||
+    phone.includes("<test")
+  );
+}
+
+function rowToPrefill(auto: Table, row: SheetRow): Prefill {
   return {
-    leadId: cell(auto, row, A.leadId),
     name: cell(auto, row, A.name),
     email: cell(auto, row, A.email),
     phone: cell(auto, row, A.phone),
+    designation: cell(auto, row, A.designation),
     company: cell(auto, row, A.company),
-    regId: cell(auto, row, A.regId) || undefined,
+    location: cell(auto, row, A.location),
+    employeeCount: cell(auto, row, A.employeeCount),
   };
 }
 
-// ---- Ingest: new form lead → automation row + WA-1 + EM-1 ----
-async function ingestLead(auto: Table, l: LeadData, source: string): Promise<void> {
-  const token = genToken();
-  await appendRow(auto, {
-    [A.leadId]: l.leadId,
-    [A.name]: l.name,
-    [A.email]: l.email,
-    [A.phone]: l.phone,
-    [A.company]: l.company,
-    [A.token]: token,
-    [A.nurtureStage]: "0",
-    [A.lastNudge]: nowIso(),
-    [A.source]: source,
-  });
+// ─────────────────────────── LOOKUP (prefill) ───────────────────────────
 
-  const ctx = ctxFor(l, token);
+/**
+ * Powers the landing page. Either:
+ *   • rid   — they arrived via our WhatsApp/email link → identified outright
+ *   • phone — they arrived via Meta's thank-you button → matched on last 10 digits
+ * Returns only what we need to prefill; never echoes another person's details
+ * back unless the identifier they supplied actually matches them.
+ */
+export async function lookupLead(q: {
+  rid?: string;
+  phone?: string;
+}): Promise<LookupResult> {
+  const auto = await readTable(env.autoTab());
+  let row: SheetRow | undefined;
+
+  if (q.rid) {
+    row = auto.rows.find((r) => cell(auto, r, A.token) === q.rid);
+  } else if (q.phone && isValidPhone(q.phone)) {
+    const key = phoneKey(q.phone);
+    row = auto.rows.find((r) => cell(auto, r, A.phoneKey) === key);
+  }
+
+  if (!row) return { found: false, alreadyRegistered: false };
+
+  const token = cell(auto, row, A.token);
+  if (isDone(cell(auto, row, A.done))) {
+    return {
+      found: true,
+      alreadyRegistered: true,
+      regId: cell(auto, row, A.regId),
+      passUrl: passUrl(token),
+      prefill: rowToPrefill(auto, row),
+    };
+  }
+  return { found: true, alreadyRegistered: false, prefill: rowToPrefill(auto, row) };
+}
+
+// ─────────────────────────── REGISTER ───────────────────────────
+
+async function sendConfirmation(
+  l: Prefill,
+  regId: string,
+  token: string,
+): Promise<{ sent: string[]; failed: string[] }> {
+  const ctx = ctxFor(l.name, token, regId);
   const sent: string[] = [];
   const failed: string[] = [];
 
@@ -143,6 +191,160 @@ async function ingestLead(auto: Table, l: LeadData, source: string): Promise<voi
     try {
       await sendTemplate({
         whatsappNumber: l.phone,
+        templateName: WA_TEMPLATES.WA5,
+        parameters: waParamsFor(WA_TEMPLATES.WA5, ctx),
+      });
+      sent.push("WA-5");
+    } catch (e) {
+      failed.push("WA-5");
+      console.error(`[register] WA-5 failed for ${regId}:`, e);
+    }
+  }
+  if (l.email) {
+    try {
+      const pass = await generatePassBase64({
+        name: l.name,
+        company: l.company,
+        regId,
+      });
+      const { subject, html } = emailFor("EM5", ctx);
+      await sendMail({
+        to: l.email,
+        subject,
+        html,
+        attachments: [
+          {
+            name: `Event_Pass_${firstNameOf(l.name)}.pdf`,
+            contentBytes: pass,
+            contentType: "application/pdf",
+          },
+        ],
+      });
+      sent.push("EM-5 (+pass)");
+    } catch (e) {
+      failed.push("EM-5");
+      console.error(`[register] EM-5 failed for ${regId}:`, e);
+    }
+  }
+  return { sent, failed };
+}
+
+/** The landing-form submit. Updates the existing lead row, or creates one. */
+export async function registerLead(input: RegistrationInput): Promise<{
+  ok: boolean;
+  already?: boolean;
+  name?: string;
+  regId?: string;
+  passUrl?: string;
+  error?: string;
+}> {
+  const auto = await readTable(env.autoTab());
+  const e164 = toE164(input.phone);
+  const key = phoneKey(input.phone);
+
+  // Find them: by token, then phone, then email.
+  let row =
+    (input.rid
+      ? auto.rows.find((r) => cell(auto, r, A.token) === input.rid)
+      : undefined) ??
+    auto.rows.find((r) => cell(auto, r, A.phoneKey) === key) ??
+    (input.email
+      ? auto.rows.find(
+          (r) =>
+            cell(auto, r, A.email).toLowerCase() === input.email.toLowerCase(),
+        )
+      : undefined);
+
+  if (row && isDone(cell(auto, row, A.done))) {
+    const token = cell(auto, row, A.token);
+    return {
+      ok: true,
+      already: true,
+      name: cell(auto, row, A.name),
+      regId: cell(auto, row, A.regId),
+      passUrl: passUrl(token),
+    };
+  }
+
+  const regId = genRegId();
+  const token = row ? cell(auto, row, A.token) || genToken() : genToken();
+
+  // The user's typed values win over whatever Meta had (profile emails go stale).
+  const fields: Record<string, string> = {
+    [A.name]: input.name,
+    [A.designation]: input.designation,
+    [A.company]: input.company,
+    [A.location]: input.location,
+    [A.employeeCount]: input.employeeCount,
+    [A.phone]: e164,
+    [A.phoneKey]: key,
+    [A.email]: input.email,
+    [A.regId]: regId,
+    [A.token]: token,
+    [A.done]: "TRUE",
+    [A.registeredAt]: nowIso(),
+    [A.passSent]: nowIso(),
+  };
+
+  if (row) {
+    await updateRow(auto, row.rowNumber, fields); // known lead completes registration
+  } else {
+    await appendRow(auto, {
+      ...fields,
+      [A.leadId]: `direct-${token.slice(0, 10)}`,
+      [A.source]: "landing_direct",
+      [A.createdAt]: nowIso(),
+      [A.nurtureStage]: "0",
+    });
+  }
+
+  const { sent, failed } = await sendConfirmation(input, regId, token);
+
+  await notifySlack(
+    `:tada: *New registration* — ${input.name}` +
+      (input.designation ? `, ${input.designation}` : "") +
+      (input.company ? ` @ ${input.company}` : "") +
+      `\n• Reg ID: *${regId}*` +
+      `\n• ${e164} · ${input.email}` +
+      (input.location ? `\n• ${input.location}` : "") +
+      (input.employeeCount ? ` · ${input.employeeCount} employees` : "") +
+      (sent.length ? `\n• Sent: ${sent.join(" + ")}` : "") +
+      (failed.length ? `\n• :warning: Failed: ${failed.join(", ")}` : ""),
+  );
+
+  return { ok: true, name: input.name, regId, passUrl: passUrl(token) };
+}
+
+// ─────────────────────────── TICK: ingest · nurture · remind ───────────────────────────
+
+async function ingestLead(
+  auto: Table,
+  l: { leadId: string; name: string; email: string; phone: string },
+): Promise<void> {
+  const token = genToken();
+  const e164 = toE164(l.phone);
+
+  await appendRow(auto, {
+    [A.leadId]: l.leadId,
+    [A.source]: "meta_form",
+    [A.createdAt]: nowIso(),
+    [A.name]: l.name,
+    [A.phone]: e164,
+    [A.phoneKey]: phoneKey(l.phone),
+    [A.email]: l.email,
+    [A.token]: token,
+    [A.nurtureStage]: "0",
+    [A.lastNudge]: nowIso(),
+  });
+
+  const ctx = ctxFor(l.name, token);
+  const sent: string[] = [];
+  const failed: string[] = [];
+
+  if (e164) {
+    try {
+      await sendTemplate({
+        whatsappNumber: e164,
         templateName: WA_TEMPLATES.WA1,
         parameters: waParamsFor(WA_TEMPLATES.WA1, ctx),
       });
@@ -164,17 +366,18 @@ async function ingestLead(auto: Table, l: LeadData, source: string): Promise<voi
   }
 
   await notifySlack(
-    `:inbox_tray: *New lead* — ${l.name || "Unknown"}` +
+    `:inbox_tray: *New lead* (Meta form) — ${l.name || "Unknown"}` +
       (sent.length ? ` · sent ${sent.join(" + ")}` : "") +
       (failed.length ? ` · :warning: failed ${failed.join(", ")}` : ""),
   );
 }
 
-// ---- Nurture: twice-daily touch (WA ladder + email ladder) ----
 async function nurtureLead(auto: Table, row: SheetRow): Promise<void> {
-  const l = leadFromAuto(auto, row);
+  const name = cell(auto, row, A.name);
+  const phone = cell(auto, row, A.phone);
+  const email = cell(auto, row, A.email);
   const token = cell(auto, row, A.token);
-  const ctx = ctxFor(l, token);
+  const ctx = ctxFor(name, token);
   const stage = parseInt(cell(auto, row, A.nurtureStage) || "0", 10) || 0;
   const tpl = WA_NURTURE_LADDER[Math.min(stage, WA_NURTURE_LADDER.length - 1)];
   const emailKind = stage === 0 ? "EM2" : stage === 1 ? "EM3" : "EM4";
@@ -182,27 +385,27 @@ async function nurtureLead(auto: Table, row: SheetRow): Promise<void> {
   const sent: string[] = [];
   const failed: string[] = [];
 
-  if (l.phone) {
+  if (phone) {
     try {
       await sendTemplate({
-        whatsappNumber: l.phone,
+        whatsappNumber: phone,
         templateName: tpl,
         parameters: waParamsFor(tpl, ctx),
       });
       sent.push(tpl);
     } catch (e) {
       failed.push(tpl);
-      console.error(`[nurture] WA failed for ${l.leadId}:`, e);
+      console.error(`[nurture] WA failed:`, e);
     }
   }
-  if (l.email) {
+  if (email) {
     try {
       const { subject, html } = emailFor(emailKind, ctx);
-      await sendMail({ to: l.email, subject, html });
+      await sendMail({ to: email, subject, html });
       sent.push(emailKind);
     } catch (e) {
       failed.push(emailKind);
-      console.error(`[nurture] email failed for ${l.leadId}:`, e);
+      console.error(`[nurture] email failed:`, e);
     }
   }
 
@@ -212,125 +415,47 @@ async function nurtureLead(auto: Table, row: SheetRow): Promise<void> {
   });
 
   await notifySlack(
-    `:bell: *Nudge* (touch ${stage + 1}) — ${l.name || "Unknown"}` +
+    `:bell: *Nudge* (touch ${stage + 1}) — ${name || "Unknown"}` +
       (sent.length ? ` · sent ${sent.join(" + ")}` : "") +
       (failed.length ? ` · :warning: failed ${failed.join(", ")}` : ""),
   );
 }
 
-// ---- Confirm: booking gate → WA-5 + EM-5 (pass) ----
-async function confirmRow(
-  auto: Table,
-  row: SheetRow,
-): Promise<{ regId: string; name: string }> {
-  const l = leadFromAuto(auto, row);
-  const regId = l.regId || genRegId();
-  const token = cell(auto, row, A.token) || genToken();
-  const ctx = { ...ctxFor({ ...l, regId }, token), regId };
-
-  await updateRow(auto, row.rowNumber, {
-    [A.done]: "TRUE",
-    [A.bookedAt]: nowIso(),
-    [A.regId]: regId,
-    [A.token]: token,
-    [A.passSent]: nowIso(),
-  });
-
-  const sent: string[] = [];
-  const failed: string[] = [];
-
-  if (l.phone) {
-    try {
-      const nativeDoc = env.wa5NativeDoc();
-      await sendTemplate({
-        whatsappNumber: l.phone,
-        templateName: WA_TEMPLATES.WA5,
-        parameters: nativeDoc
-          ? [{ name: "1", value: ctx.firstName }]
-          : waParamsFor(WA_TEMPLATES.WA5, ctx),
-        headerDocument:
-          nativeDoc && ctx.passUrl
-            ? { paramName: env.watiDocParam(), url: ctx.passUrl }
-            : undefined,
-      });
-      sent.push("WA-5");
-    } catch (e) {
-      failed.push("WA-5");
-      console.error(`[confirm] WA-5 failed for ${l.leadId}:`, e);
-    }
-  }
-  if (l.email) {
-    try {
-      const pass = await generatePassBase64({
-        name: l.name || "Guest",
-        company: l.company,
-        regId,
-      });
-      const { subject, html } = emailFor("EM5", ctx);
-      await sendMail({
-        to: l.email,
-        subject,
-        html,
-        attachments: [
-          {
-            name: `Event_Pass_${firstNameOf(l.name)}.pdf`,
-            contentBytes: pass,
-            contentType: "application/pdf",
-          },
-        ],
-      });
-      sent.push("EM-5 (+pass)");
-    } catch (e) {
-      failed.push("EM-5");
-      console.error(`[confirm] EM-5 failed for ${l.leadId}:`, e);
-    }
-  }
-
-  await notifySlack(
-    `:tada: *Booking confirmed* — ${l.name || "Guest"}${l.company ? ` (${l.company})` : ""} · Reg ID ${regId}` +
-      (sent.length ? ` · sent ${sent.join(" + ")}` : "") +
-      (failed.length ? ` · :warning: failed ${failed.join(", ")}` : ""),
-  );
-  return { regId, name: l.name || "Guest" };
-}
-
-// ---- Reminders: EM-6/7/8 + WA-6/7/8 ----
 async function remindLead(auto: Table, row: SheetRow): Promise<number> {
   const sentCsv = cell(auto, row, A.remindersSent);
   const due = dueReminders(sentCsv);
   if (!due.length) return 0;
 
-  const l = leadFromAuto(auto, row);
+  const name = cell(auto, row, A.name) || "Guest";
+  const company = cell(auto, row, A.company);
+  const email = cell(auto, row, A.email);
+  const phone = cell(auto, row, A.phone);
+  const regId = cell(auto, row, A.regId);
   const token = cell(auto, row, A.token);
-  const ctx = ctxFor(l, token);
-  const already = new Set(
-    sentCsv.split(",").map((s) => s.trim()).filter(Boolean),
-  );
+  const ctx = ctxFor(name, token, regId || undefined);
+
+  const already = new Set(sentCsv.split(",").map((s) => s.trim()).filter(Boolean));
   const justSent: string[] = [];
   const failed: string[] = [];
 
   for (const r of due) {
     try {
       if (r.kind === "email") {
-        if (!l.email) continue;
+        if (!email) continue;
         const kind = r.key === "EM6" ? "EM6" : r.key === "EM7" ? "EM7" : "EM8";
         const { subject, html } = emailFor(kind, ctx);
-        const attachments = l.regId
+        const attachments = regId
           ? [
               {
-                name: `Event_Pass_${firstNameOf(l.name)}.pdf`,
-                contentBytes: await generatePassBase64({
-                  name: l.name || "Guest",
-                  company: l.company,
-                  regId: l.regId,
-                }),
+                name: `Event_Pass_${firstNameOf(name)}.pdf`,
+                contentBytes: await generatePassBase64({ name, company, regId }),
                 contentType: "application/pdf",
               },
             ]
           : undefined;
-        await sendMail({ to: l.email, subject, html, attachments });
+        await sendMail({ to: email, subject, html, attachments });
       } else {
-        if (!l.phone) continue;
+        if (!phone) continue;
         const tpl =
           r.key === "WA6"
             ? WA_TEMPLATES.WA6
@@ -338,7 +463,7 @@ async function remindLead(auto: Table, row: SheetRow): Promise<number> {
               ? WA_TEMPLATES.WA7
               : WA_TEMPLATES.WA8;
         await sendTemplate({
-          whatsappNumber: l.phone,
+          whatsappNumber: phone,
           templateName: tpl,
           parameters: waParamsFor(tpl, ctx),
         });
@@ -347,7 +472,7 @@ async function remindLead(auto: Table, row: SheetRow): Promise<number> {
       justSent.push(r.key);
     } catch (e) {
       failed.push(r.key);
-      console.error(`[remind] ${r.key} failed for ${l.leadId}:`, e);
+      console.error(`[remind] ${r.key} failed:`, e);
     }
   }
 
@@ -358,7 +483,7 @@ async function remindLead(auto: Table, row: SheetRow): Promise<number> {
   }
   if (justSent.length || failed.length) {
     await notifySlack(
-      `:alarm_clock: *Reminder* — ${l.name || "Guest"}` +
+      `:alarm_clock: *Reminder* — ${name}` +
         (justSent.length ? ` · sent ${justSent.join(" + ")}` : "") +
         (failed.length ? ` · :warning: failed ${failed.join(", ")}` : ""),
     );
@@ -371,14 +496,13 @@ export interface TickSummary {
   nurtured: number;
   remindersSent: number;
   formRows: number;
-  automationRows: number;
+  leads: number;
   errors: string[];
 }
 
-// The hourly tick — the whole scheduled engine.
 export async function runTick(): Promise<TickSummary> {
   const [form, auto] = await Promise.all([
-    readTable(env.formTab()),
+    readTable(env.formTab()).catch(() => null), // form tab may not exist yet
     readTable(env.autoTab()),
   ]);
 
@@ -386,141 +510,64 @@ export async function runTick(): Promise<TickSummary> {
     ingested: 0,
     nurtured: 0,
     remindersSent: 0,
-    formRows: form.rows.length,
-    automationRows: auto.rows.length,
+    formRows: form?.rows.length ?? 0,
+    leads: auto.rows.length,
     errors: [],
   };
 
-  // Resolve the form's column names (they differ from ours, e.g. "your_name:").
-  const cId = resolveHeader(form, FORM.id);
-  const cName = resolveHeader(form, FORM.name);
-  const cEmail = resolveHeader(form, FORM.email);
-  const cPhone = resolveHeader(form, FORM.phone);
-  const cCompany = resolveHeader(form, FORM.company);
+  // 1) INGEST — Meta-form rows we haven't seen (matched on lead id, then phone).
+  if (form) {
+    const cId = resolveHeader(form, FORM.id);
+    const cName = resolveHeader(form, FORM.name);
+    const cEmail = resolveHeader(form, FORM.email);
+    const cPhone = resolveHeader(form, FORM.phone);
 
-  const known = new Set(
-    auto.rows.map((r) => cell(auto, r, A.leadId)).filter(Boolean),
-  );
+    const knownIds = new Set(auto.rows.map((r) => cell(auto, r, A.leadId)).filter(Boolean));
+    const knownPhones = new Set(auto.rows.map((r) => cell(auto, r, A.phoneKey)).filter(Boolean));
 
-  // 1) INGEST — form rows we haven't seen before.
-  for (const fr of form.rows) {
-    const leadId = cId ? cell(form, fr, cId) : "";
-    if (!leadId || known.has(leadId)) continue;
-    const l: LeadData = {
-      leadId,
-      name: cName ? cell(form, fr, cName) : "",
-      email: cEmail ? cell(form, fr, cEmail) : "",
-      phone: cPhone ? cell(form, fr, cPhone) : "",
-      company: cCompany ? cell(form, fr, cCompany) : "",
-    };
-    if (!l.email && !l.phone) continue;
-    if (isTestLead(l)) continue;
-    try {
-      await ingestLead(auto, l, "meta_form");
-      known.add(leadId);
-      summary.ingested++;
-    } catch (e) {
-      const msg = `ingest ${leadId}: ${(e as Error).message}`;
-      summary.errors.push(msg);
-      console.error("[tick]", msg);
+    for (const fr of form.rows) {
+      const leadId = cId ? cell(form, fr, cId) : "";
+      const name = cName ? cell(form, fr, cName) : "";
+      const email = cEmail ? cell(form, fr, cEmail) : "";
+      const phone = cPhone ? cell(form, fr, cPhone) : "";
+      if (!leadId || (!email && !phone)) continue;
+      if (knownIds.has(leadId) || (phone && knownPhones.has(phoneKey(phone)))) continue;
+      if (isTestLead(name, email, phone)) continue;
+      try {
+        await ingestLead(auto, { leadId, name, email, phone });
+        knownIds.add(leadId);
+        if (phone) knownPhones.add(phoneKey(phone));
+        summary.ingested++;
+      } catch (e) {
+        summary.errors.push(`ingest ${leadId}: ${(e as Error).message}`);
+      }
     }
   }
 
-  // 2) NURTURE + REMINDERS — on existing automation rows.
+  // 2) NURTURE (not yet registered) + REMINDERS (registered).
   const quiet = isQuietHours();
-  for (const ar of auto.rows) {
-    if (!cell(auto, ar, A.token)) continue; // not an active lead row
+  for (const row of auto.rows) {
+    if (!cell(auto, row, A.token)) continue;
     try {
-      if (isDone(cell(auto, ar, A.done))) {
-        summary.remindersSent += await remindLead(auto, ar);
-      } else if (!quiet && dueForNurture(cell(auto, ar, A.lastNudge))) {
-        await nurtureLead(auto, ar);
+      if (isDone(cell(auto, row, A.done))) {
+        summary.remindersSent += await remindLead(auto, row);
+      } else if (!quiet && dueForNurture(cell(auto, row, A.lastNudge))) {
+        await nurtureLead(auto, row);
         summary.nurtured++;
       }
     } catch (e) {
-      const msg = `row ${ar.rowNumber}: ${(e as Error).message}`;
-      summary.errors.push(msg);
-      console.error("[tick]", msg);
+      summary.errors.push(`row ${row.rowNumber}: ${(e as Error).message}`);
     }
   }
 
   if (summary.errors.length) {
     await notifySlack(
-      `:rotating_light: Tick finished with *${summary.errors.length} error(s)* — ${summary.errors[0]}`,
+      `:rotating_light: Tick had *${summary.errors.length} error(s)* — ${summary.errors[0]}`,
     );
   }
   return summary;
 }
 
-// ---- Confirm entry points (called by /api/confirm) ----
-
-export async function confirmByToken(
-  token: string,
-): Promise<{ ok: boolean; already?: boolean; name?: string; regId?: string; error?: string }> {
-  const auto = await readTable(env.autoTab());
-  const row = auto.rows.find((r) => cell(auto, r, A.token) === token);
-  if (!row) return { ok: false, error: "not_found" };
-  if (isDone(cell(auto, row, A.done))) {
-    return {
-      ok: true,
-      already: true,
-      name: cell(auto, row, A.name),
-      regId: cell(auto, row, A.regId),
-    };
-  }
-  const { regId, name } = await confirmRow(auto, row);
-  return { ok: true, name, regId };
-}
-
-export async function confirmOrganic(input: {
-  name: string;
-  email: string;
-  phone: string;
-  company?: string;
-}): Promise<{ ok: boolean; name: string; regId?: string; error?: string }> {
-  const auto = await readTable(env.autoTab());
-  const digits = (s: string) => s.replace(/\D/g, "");
-
-  // De-dupe: same email or phone already tracked → confirm that row.
-  const existing = auto.rows.find(
-    (r) =>
-      (input.email &&
-        cell(auto, r, A.email).toLowerCase() === input.email.toLowerCase()) ||
-      (input.phone && digits(cell(auto, r, A.phone)) === digits(input.phone)),
-  );
-  if (existing) {
-    if (isDone(cell(auto, existing, A.done))) {
-      return {
-        ok: true,
-        name: cell(auto, existing, A.name),
-        regId: cell(auto, existing, A.regId),
-      };
-    }
-    const { regId, name } = await confirmRow(auto, existing);
-    return { ok: true, name, regId };
-  }
-
-  const token = genToken();
-  await appendRow(auto, {
-    [A.leadId]: `organic-${token.slice(0, 10)}`,
-    [A.name]: input.name,
-    [A.email]: input.email,
-    [A.phone]: input.phone,
-    [A.company]: input.company ?? "",
-    [A.token]: token,
-    [A.nurtureStage]: "0",
-    [A.lastNudge]: nowIso(),
-    [A.source]: "organic",
-  });
-
-  const auto2 = await readTable(env.autoTab());
-  const row = auto2.rows.find((r) => cell(auto2, r, A.token) === token);
-  if (!row) return { ok: false, name: input.name, error: "append_failed" };
-  const { regId, name } = await confirmRow(auto2, row);
-  return { ok: true, name, regId };
-}
-
-// Regenerate the pass PDF for a token (powers GET /api/pass).
 export async function passPdfForToken(
   token: string,
 ): Promise<{ bytes: Uint8Array; filename: string } | null> {
@@ -528,7 +575,7 @@ export async function passPdfForToken(
   const row = auto.rows.find((r) => cell(auto, r, A.token) === token);
   if (!row) return null;
   const regId = cell(auto, row, A.regId);
-  if (!regId) return null; // pass not issued until confirmed
+  if (!regId) return null;
   const name = cell(auto, row, A.name) || "Guest";
   const company = cell(auto, row, A.company);
   const bytes = await generatePass({ name, company, regId });

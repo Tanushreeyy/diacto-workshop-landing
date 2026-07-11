@@ -23,9 +23,7 @@ export const env = {
   // Private key is stored with escaped newlines in most hosts' env UIs.
   googlePrivateKey: () => req("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n"),
   sheetId: () => req("SHEET_ID"),
-  // The Meta connector owns the form tab — we only ever READ it. All booking
-  // state lives in a separate automation tab, so a form/connector change can
-  // never shift or clobber it.
+  // Meta's connector owns the form tab — we only ever READ it.
   formTab: () => opt("SHEET_FORM_TAB", "v2_form"),
   autoTab: () => opt("SHEET_AUTOMATION_TAB", "automation"),
 

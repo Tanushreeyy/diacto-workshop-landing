@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { EVENT } from "@/lib/event";
-import CaptureModal from "./CaptureModal";
+import RegisterModal from "./RegisterModal";
 
 interface Props {
   className?: string;
@@ -11,20 +11,22 @@ interface Props {
   tabIndex?: number;
 }
 
-type State = "idle" | "loading" | "done" | "capture" | "error";
-
 /**
- * The booking CTA. Replaces the old scroll-only button.
- *  - Ad leads arrive with ?rid=<token> → one-tap confirm.
- *  - Organic visitors (no token) → capture modal → same confirm flow.
- * Confirmation triggers WA-6 + EM-1 (Event Pass) server-side.
+ * The booking CTA. Opens the registration modal — submitting it registers the
+ * person outright (sheet row + Event Pass on WhatsApp & email). There is no
+ * pending state and no OTP step.
  */
 export default function BookButton({ className = "", children, tabIndex }: Props) {
+  const [open, setOpen] = useState(false);
   const [rid, setRid] = useState<string | null>(null);
-  const [state, setState] = useState<State>("idle");
-  const [name, setName] = useState("");
-  const [msg, setMsg] = useState("");
+  const [done, setDone] = useState<{
+    name: string;
+    regId: string;
+    already: boolean;
+    passUrl?: string;
+  } | null>(null);
 
+  // Arrived from our WhatsApp/email link? Then we can identify them outright.
   useEffect(() => {
     setRid(new URLSearchParams(window.location.search).get("rid"));
   }, []);
@@ -35,50 +37,32 @@ export default function BookButton({ className = "", children, tabIndex }: Props
     "bg-brand-gold text-brand-black hover:bg-brand-gold-light shadow-sm " +
     "hover:shadow-lg hover:-translate-y-0.5 focus-visible:outline-none " +
     "focus-visible:ring-2 focus-visible:ring-brand-gold focus-visible:ring-offset-2 " +
-    "disabled:opacity-70 disabled:hover:translate-y-0 " +
     className;
 
-  async function confirmToken(token: string) {
-    setState("loading");
-    try {
-      const res = await fetch("/api/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setName(data.name || "");
-        setMsg(
-          data.already
-            ? "You're already confirmed — see you there!"
-            : "Your Event Pass is on its way to your email & WhatsApp.",
-        );
-        setState("done");
-      } else if (data.error === "not_found") {
-        setState("capture"); // stale/unknown token → let them re-enter details
-      } else {
-        setMsg("Something went wrong. Please try again or contact support.");
-        setState("error");
-      }
-    } catch {
-      setMsg("Network error. Please try again.");
-      setState("error");
-    }
-  }
-
-  function onClick() {
-    if (rid) confirmToken(rid);
-    else setState("capture");
-  }
-
-  if (state === "done") {
+  if (done) {
     return (
       <div className="rounded-2xl border border-brand-gold/40 bg-brand-gold/10 px-6 py-4 text-center">
         <p className="font-sans font-semibold text-brand-gold">
-          🎉 {name ? `${name}, your` : "Your"} seat is confirmed!
+          🎉 {done.name ? `${done.name}, your` : "Your"} seat is confirmed!
         </p>
-        <p className="mt-1 font-sans text-sm text-white/80">{msg}</p>
+        <p className="mt-1 font-sans text-sm text-white/80">
+          {done.already
+            ? "You're already registered — see you there!"
+            : "Your Event Pass is on its way to your WhatsApp & email."}
+        </p>
+        {done.regId && (
+          <p className="mt-1 font-sans text-xs text-white/60">
+            Registration ID: {done.regId}
+          </p>
+        )}
+        {done.passUrl && (
+          <a
+            href={done.passUrl}
+            className="mt-3 inline-block rounded-full bg-brand-gold px-5 py-2 font-sans text-sm font-semibold text-brand-black transition hover:bg-brand-gold-light"
+          >
+            📎 Download your Event Pass
+          </a>
+        )}
       </div>
     );
   }
@@ -87,23 +71,19 @@ export default function BookButton({ className = "", children, tabIndex }: Props
     <>
       <button
         type="button"
-        onClick={onClick}
-        disabled={state === "loading"}
+        onClick={() => setOpen(true)}
         tabIndex={tabIndex}
         className={pill}
       >
-        {state === "loading" ? "Confirming…" : children ?? EVENT.ctaText}
+        {children ?? EVENT.ctaText}
       </button>
-      {state === "error" && (
-        <p className="mt-2 font-sans text-sm text-red-400">{msg}</p>
-      )}
-      {state === "capture" && (
-        <CaptureModal
-          onClose={() => setState("idle")}
-          onConfirmed={(n) => {
-            setName(n);
-            setMsg("Your Event Pass is on its way to your email & WhatsApp.");
-            setState("done");
+      {open && (
+        <RegisterModal
+          rid={rid}
+          onClose={() => setOpen(false)}
+          onRegistered={(name, regId, already, passUrl) => {
+            setOpen(false);
+            setDone({ name, regId, already, passUrl });
           }}
         />
       )}
