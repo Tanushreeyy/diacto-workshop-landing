@@ -1,4 +1,4 @@
-# One command to run the whole thing: `docker compose up -d`
+# One command to run the whole thing: `docker compose up -d --build`
 #
 #   app  — the landing page + booking API
 #   cron — calls /api/cron/tick every 5 minutes (ingest, nurture, reminders)
@@ -6,6 +6,8 @@
 # The cron service means you do NOT need a scheduler on the host. If you already
 # have one (k8s CronJob, systemd timer, an external pinger), delete the `cron`
 # service and point yours at POST /api/cron/tick with the Authorization header.
+#
+# Watch the heartbeat:  docker compose logs -f cron
 
 services:
   app:
@@ -15,19 +17,41 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+    # Cron waits for this to pass before its first tick. Without it, cron races
+    # the app's boot, the first tick hits a dead port, and it then sleeps 5
+    # minutes — which looks exactly like a broken cron.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
 
   cron:
     image: curlimages/curl:8.10.1
     depends_on:
-      - app
+      app:
+        condition: service_healthy # not merely "started" — actually serving
     env_file: .env.production
     restart: unless-stopped
     entrypoint: ["/bin/sh", "-c"]
+    # Every iteration prints ONE timestamped line, success or failure, so
+    # `docker compose logs cron` reads as a heartbeat. Silence means broken.
     command:
       - |
+        echo "[cron] started — ticking every 300s"
         while true; do
-          curl -fsS -m 120 -X POST \
-            -H "Authorization: Bearer $${CRON_SECRET}" \
-            http://app:3000/api/cron/tick || echo "tick failed"
+          ts=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          if out=$$(curl -fsS -m 120 -X POST \
+                      -H "Authorization: Bearer $${CRON_SECRET}" \
+                      http://app:3000/api/cron/tick 2>&1); then
+            echo "$$ts tick ok      $$out"
+          else
+            echo "$$ts tick FAILED  $$out"
+          fi
           sleep 300
         done
