@@ -25,11 +25,15 @@ export async function POST(req: NextRequest) {
     employeeCount: s("employeeCount"),
     phone: s("phone"),
     email: s("email"),
+    expectations: s("expectations"),
   };
 
-  const missing = (
-    ["name", "designation", "company", "location", "employeeCount", "phone", "email"] as const
-  ).filter((k) => !input[k]);
+  // The qualifying answers (designation / company / employee count) now come from
+  // the Meta form, so the landing page only asks a lead for the ones we're missing.
+  // An empty one here means "we already had it" — requiring it server-side would
+  // reject exactly the ad leads it was moved off the page to spare. registerLead
+  // preserves the stored value rather than blanking it.
+  const missing = (["name", "phone", "email"] as const).filter((k) => !input[k]);
   if (missing.length) {
     return NextResponse.json(
       { ok: false, error: "missing_fields", fields: missing },

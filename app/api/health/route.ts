@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/booking/env";
-import { readTable } from "@/lib/booking/google";
+import { readTable, resolveHeader } from "@/lib/booking/google";
 import { WORKSHOP, WA_TEMPLATES, REMINDERS } from "@/lib/booking/config";
 
 export const runtime = "nodejs";
@@ -43,7 +43,13 @@ async function checkEnv(): Promise<Check> {
 async function checkSheet(): Promise<Check> {
   try {
     const auto = await readTable(env.autoTab());
-    const need = ["phone_key", "confirm_token", "registration_complete", "reg_id"];
+    const need = [
+      "phone_key",
+      "confirm_token",
+      "registration_complete",
+      "reg_id",
+      "expectations",
+    ];
     const missing = need.filter((c) => !(c in auto.index));
     if (missing.length) {
       return { name: "google_sheet", ok: false, detail: `tab '${env.autoTab()}' missing columns: ${missing.join(", ")}` };
@@ -52,6 +58,31 @@ async function checkSheet(): Promise<Check> {
   } catch (e) {
     return { name: "google_sheet", ok: false, detail: (e as Error).message.slice(0, 160) };
   }
+}
+
+// Every tab named in SHEET_FORM_TAB must actually be readable — a typo'd tab name
+// is otherwise invisible: the tick swallows the read error and simply ingests
+// nothing, which looks exactly like "the ad isn't running yet".
+async function checkFormTabs(): Promise<Check> {
+  const tabs = env.formTabs();
+  if (!tabs.length) return { name: "form_tabs", ok: false, detail: "SHEET_FORM_TAB is empty" };
+  const results = await Promise.all(
+    tabs.map(async (t) => {
+      try {
+        const f = await readTable(t);
+        const has = (c: string[]) => (resolveHeader(f, c) ? "y" : "-");
+        return `${t}: ${f.rows.length} row(s) [desig ${has(["designation"])} · company ${has(["company_name", "company"])} · emp ${has(["no_of_employees", "number_of_employees", "employee_count"])}]`;
+      } catch {
+        return `${t}: UNREADABLE`;
+      }
+    }),
+  );
+  const bad = results.filter((r) => r.includes("UNREADABLE"));
+  return {
+    name: "form_tabs",
+    ok: bad.length === 0,
+    detail: results.join(" | "),
+  };
 }
 
 async function checkGraph(): Promise<Check> {
@@ -113,6 +144,7 @@ export async function GET(req: NextRequest) {
   const checks = await Promise.all([
     checkEnv(),
     checkSheet(),
+    checkFormTabs(),
     checkGraph(),
     checkWati(),
     checkSlack(),
@@ -125,7 +157,7 @@ export async function GET(req: NextRequest) {
       checks,
       config: {
         landingBaseUrl: env.landingBaseUrl(),
-        formTab: env.formTab(),
+        formTabs: env.formTabs(),
         automationTab: env.autoTab(),
         eventStartUtc: WORKSHOP.eventStartUtc,
         reminders: REMINDERS.map((r) => `${r.key} @ ${r.at}`),

@@ -53,14 +53,32 @@ const A = {
   lastNudge: "last_nudge_at",
   passSent: "pass_sent_at",
   remindersSent: "reminders_sent",
+  expectations: "expectations",
 } as const;
 
-// ---- form tab (Meta's) — resolved by candidate names ----
+// Columns T/U/V of the automation tab (Status / Sub Status / Remarks) belong to
+// the calling team, not to us. They are absent from this map on purpose:
+// updateRow() only ever writes keys it finds here, so we can never clobber them.
+
+// ---- form tabs (Meta's) — resolved by candidate names ----
+// Header matching ignores case and punctuation (see resolveHeader), so one
+// candidate covers "Company Name", "company_name" and "company_name:" alike.
 const FORM = {
   id: ["id"],
-  name: ["full_name", "your_name:", "name"],
+  name: ["full_name", "your_name", "name"],
   email: ["email", "email_address"],
   phone: ["phone", "phone_number"],
+  // Added by the v3 form (Snehal's qualifying questions). Absent from the older
+  // form's tab — resolveHeader returns null there and ingest just leaves them blank.
+  designation: ["designation", "your_designation", "what_is_your_designation"],
+  company: ["company_name", "company", "organization_name", "organisation_name"],
+  employeeCount: [
+    "no_of_employees",
+    "number_of_employees",
+    "employee_count",
+    "employees",
+    "company_size",
+  ],
 };
 
 const isDone = (v: string) => (v || "").trim().toUpperCase() === "TRUE";
@@ -73,6 +91,7 @@ export interface Prefill {
   company: string;
   location: string;
   employeeCount: string;
+  expectations: string;
 }
 
 export interface LookupResult {
@@ -135,6 +154,7 @@ function rowToPrefill(auto: Table, row: SheetRow): Prefill {
     company: cell(auto, row, A.company),
     location: cell(auto, row, A.location),
     employeeCount: cell(auto, row, A.employeeCount),
+    expectations: cell(auto, row, A.expectations),
   };
 }
 
@@ -272,19 +292,29 @@ export async function registerLead(input: RegistrationInput): Promise<{
   // The user's typed values win over whatever Meta had (profile emails go stale).
   const fields: Record<string, string> = {
     [A.name]: input.name,
-    [A.designation]: input.designation,
-    [A.company]: input.company,
-    [A.location]: input.location,
-    [A.employeeCount]: input.employeeCount,
     [A.phone]: e164,
     [A.phoneKey]: key,
     [A.email]: input.email,
+    [A.expectations]: input.expectations,
     [A.regId]: regId,
     [A.token]: token,
     [A.done]: "TRUE",
     [A.registeredAt]: nowIso(),
     [A.passSent]: nowIso(),
   };
+
+  // The qualifying answers now come from the Meta form, so the landing page only
+  // asks for the ones we're still missing — which means an empty value here means
+  // "not asked", NOT "cleared". Writing it back would wipe what Meta gave us (and
+  // blank the company line on the Event Pass). Only overwrite when they typed something.
+  for (const [col, typed] of [
+    [A.designation, input.designation],
+    [A.company, input.company],
+    [A.location, input.location],
+    [A.employeeCount, input.employeeCount],
+  ] as const) {
+    if (typed) fields[col] = typed;
+  }
 
   if (row) {
     await updateRow(auto, row.rowNumber, fields); // known lead completes registration
@@ -298,29 +328,53 @@ export async function registerLead(input: RegistrationInput): Promise<{
     });
   }
 
-  const { sent, failed } = await sendConfirmation(input, regId, token);
+  // What the lead actually IS, not just what they retyped: the hidden fields are
+  // absent from `input`, and the Event Pass prints the company. Row first, typed on top.
+  const was = row
+    ? rowToPrefill(auto, row)
+    : { name: "", email: "", phone: "", designation: "", company: "", location: "", employeeCount: "", expectations: "" };
+  const pick = (typed: string, had: string) => typed || had;
+  const lead: Prefill = {
+    name: pick(input.name, was.name),
+    email: pick(input.email, was.email),
+    phone: e164,
+    designation: pick(input.designation, was.designation),
+    company: pick(input.company, was.company),
+    location: pick(input.location, was.location),
+    employeeCount: pick(input.employeeCount, was.employeeCount),
+    expectations: pick(input.expectations, was.expectations),
+  };
+
+  const { sent, failed } = await sendConfirmation(lead, regId, token);
 
   await notifySlack(
-    `:tada: *New registration* — ${input.name}` +
-      (input.designation ? `, ${input.designation}` : "") +
-      (input.company ? ` @ ${input.company}` : "") +
+    `:tada: *New registration* — ${lead.name}` +
+      (lead.designation ? `, ${lead.designation}` : "") +
+      (lead.company ? ` @ ${lead.company}` : "") +
       `\n• Reg ID: *${regId}*` +
-      `\n• ${e164} · ${input.email}` +
-      (input.location ? `\n• ${input.location}` : "") +
-      (input.employeeCount ? ` · ${input.employeeCount} employees` : "") +
+      `\n• ${e164} · ${lead.email}` +
+      (lead.employeeCount ? `\n• ${lead.employeeCount} employees` : "") +
+      (lead.expectations ? `\n• _Expectations:_ ${lead.expectations}` : "") +
       (sent.length ? `\n• Sent: ${sent.join(" + ")}` : "") +
       (failed.length ? `\n• :warning: Failed: ${failed.join(", ")}` : ""),
   );
 
-  return { ok: true, name: input.name, regId, passUrl: passUrl(token) };
+  return { ok: true, name: lead.name, regId, passUrl: passUrl(token) };
 }
 
 // ─────────────────────────── TICK: ingest · nurture · remind ───────────────────────────
 
-async function ingestLead(
-  auto: Table,
-  l: { leadId: string; name: string; email: string; phone: string },
-): Promise<void> {
+interface FormLead {
+  leadId: string;
+  name: string;
+  email: string;
+  phone: string;
+  designation: string;
+  company: string;
+  employeeCount: string;
+}
+
+async function ingestLead(auto: Table, l: FormLead): Promise<void> {
   const token = genToken();
   const e164 = toE164(l.phone);
 
@@ -329,6 +383,11 @@ async function ingestLead(
     [A.source]: "meta_form",
     [A.createdAt]: nowIso(),
     [A.name]: l.name,
+    // Present only on the v3 form; blank from the older one, and then asked for
+    // on the landing page instead.
+    [A.designation]: l.designation,
+    [A.company]: l.company,
+    [A.employeeCount]: l.employeeCount,
     [A.phone]: e164,
     [A.phoneKey]: phoneKey(l.phone),
     [A.email]: l.email,
@@ -509,8 +568,11 @@ export async function runTick(): Promise<TickSummary> {
   const budgetMs = env.tickBudgetMs();
   const outOfTime = () => Date.now() - startedAt > budgetMs;
 
-  const [form, auto] = await Promise.all([
-    readTable(env.formTab()).catch(() => null), // form tab may not exist yet
+  // One tab per live Instant Form. A tab that doesn't exist yet (the next form's
+  // connection hasn't run) resolves to null and is simply skipped.
+  const tabs = env.formTabs();
+  const [forms, auto] = await Promise.all([
+    Promise.all(tabs.map((t) => readTable(t).catch(() => null))),
     readTable(env.autoTab()),
   ]);
 
@@ -518,33 +580,50 @@ export async function runTick(): Promise<TickSummary> {
     ingested: 0,
     nurtured: 0,
     remindersSent: 0,
-    formRows: form?.rows.length ?? 0,
+    formRows: forms.reduce((n, f) => n + (f?.rows.length ?? 0), 0),
     leads: auto.rows.length,
     truncated: false,
     errors: [],
   };
 
-  // 1) INGEST — Meta-form rows we haven't seen (matched on lead id, then phone).
-  if (form) {
+  // 1) INGEST — form rows we haven't seen (matched on lead id, then phone).
+  // Dedupe sets are built once from the automation tab and shared across every
+  // form tab, so the same person submitting both forms is ingested exactly once.
+  const knownIds = new Set(auto.rows.map((r) => cell(auto, r, A.leadId)).filter(Boolean));
+  const knownPhones = new Set(auto.rows.map((r) => cell(auto, r, A.phoneKey)).filter(Boolean));
+
+  for (const form of forms) {
+    if (!form) continue;
+    if (outOfTime()) { summary.truncated = true; break; }
+
     const cId = resolveHeader(form, FORM.id);
     const cName = resolveHeader(form, FORM.name);
     const cEmail = resolveHeader(form, FORM.email);
     const cPhone = resolveHeader(form, FORM.phone);
-
-    const knownIds = new Set(auto.rows.map((r) => cell(auto, r, A.leadId)).filter(Boolean));
-    const knownPhones = new Set(auto.rows.map((r) => cell(auto, r, A.phoneKey)).filter(Boolean));
+    const cDesig = resolveHeader(form, FORM.designation);
+    const cCompany = resolveHeader(form, FORM.company);
+    const cEmp = resolveHeader(form, FORM.employeeCount);
+    const get = (fr: SheetRow, col: string | null) => (col ? cell(form, fr, col) : "");
 
     for (const fr of form.rows) {
       if (outOfTime()) { summary.truncated = true; break; }
-      const leadId = cId ? cell(form, fr, cId) : "";
-      const name = cName ? cell(form, fr, cName) : "";
-      const email = cEmail ? cell(form, fr, cEmail) : "";
-      const phone = cPhone ? cell(form, fr, cPhone) : "";
+      const leadId = get(fr, cId);
+      const name = get(fr, cName);
+      const email = get(fr, cEmail);
+      const phone = get(fr, cPhone);
       if (!leadId || (!email && !phone)) continue;
       if (knownIds.has(leadId) || (phone && knownPhones.has(phoneKey(phone)))) continue;
       if (isTestLead(name, email, phone)) continue;
       try {
-        await ingestLead(auto, { leadId, name, email, phone });
+        await ingestLead(auto, {
+          leadId,
+          name,
+          email,
+          phone,
+          designation: get(fr, cDesig),
+          company: get(fr, cCompany),
+          employeeCount: get(fr, cEmp),
+        });
         knownIds.add(leadId);
         if (phone) knownPhones.add(phoneKey(phone));
         summary.ingested++;

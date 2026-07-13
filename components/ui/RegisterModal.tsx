@@ -9,26 +9,36 @@ interface Props {
   onRegistered: () => void;
 }
 
-const EMPLOYEE_COUNTS = ["1-10", "11-50", "51-200", "201-500", "500+"];
+// Mirror the Instant Form's choices exactly — the same person may answer in both
+// places, and two vocabularies for one field make the sheet unsortable.
+const DESIGNATIONS = ["Founder/Director/CEO", "Co-Founder/COO/CFO", "Others"];
+const EMPLOYEE_COUNTS = ["1-20", "21-50", "51-200", "201 & Above"];
 
 interface Fields {
   name: string;
   designation: string;
   company: string;
-  location: string;
   employeeCount: string;
   phone: string;
   email: string;
+  expectations: string;
 }
 const EMPTY: Fields = {
   name: "",
   designation: "",
   company: "",
-  location: "",
   employeeCount: "",
   phone: "",
   email: "",
+  expectations: "",
 };
+
+// The qualifying answers moved to the Meta form, so we ask for them here only
+// when we don't already have them. That is decided PER FIELD, not per lead:
+// leads captured by the older form are "known" yet have no designation/company,
+// and hiding the fields for them would drop the answers on the floor.
+type Qualifier = "designation" | "company" | "employeeCount";
+const QUALIFIERS: Qualifier[] = ["designation", "company", "employeeCount"];
 
 type Step = "loading" | "phone" | "form" | "already" | "success";
 
@@ -53,6 +63,12 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
   const [f, setF] = useState<Fields>(EMPTY);
   const [phoneInput, setPhoneInput] = useState("");
   const [known, setKnown] = useState(false);
+  // Which qualifying answers we already hold, and so must not ask for again.
+  const [have, setHave] = useState<Record<Qualifier, boolean>>({
+    designation: false,
+    company: false,
+    employeeCount: false,
+  });
   const [already, setAlready] = useState<{ regId: string; passUrl?: string } | null>(null);
   const [success, setSuccess] = useState<{ name: string; regId: string; passUrl?: string } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -82,10 +98,15 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
       name: p.name || "",
       designation: p.designation || "",
       company: p.company || "",
-      location: p.location || "",
       employeeCount: p.employeeCount || "",
       phone: p.phone || typedPhone || "",
       email: p.email || "",
+      expectations: "",
+    });
+    setHave({
+      designation: !!p.designation,
+      company: !!p.company,
+      employeeCount: !!p.employeeCount,
     });
     setStep("form");
   }, []);
@@ -120,8 +141,10 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
     if (step === "form" || step === "phone") firstRef.current?.focus();
   }, [step]);
 
-  const set = (k: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setF((p) => ({ ...p, [k]: e.target.value }));
+  const set =
+    (k: keyof Fields) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+      setF((p) => ({ ...p, [k]: e.target.value }));
 
   async function submitPhone(e: React.FormEvent) {
     e.preventDefault();
@@ -148,14 +171,16 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
   async function submitForm(e: React.FormEvent) {
     e.preventDefault();
     setErr("");
+    // Only the fields actually on screen: a qualifier we already have is hidden,
+    // therefore blank, and demanding it would block the lead on an invisible input.
+    // Expectations is deliberately absent: it's optional. It sits at the very last
+    // step before a confirmed seat, and a required free-text box there costs more
+    // completions than the answer is worth.
     const required: (keyof Fields)[] = [
       "name",
-      "designation",
-      "company",
-      "location",
-      "employeeCount",
       "phone",
       "email",
+      ...QUALIFIERS.filter((q) => !have[q]),
     ];
     if (required.some((k) => !f[k].trim())) {
       setErr("Please fill in all fields.");
@@ -343,27 +368,36 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
                 <label className={label} htmlFor="r-name">Your Name *</label>
                 <input id="r-name" ref={firstRef} className={field} value={f.name} onChange={set("name")} />
               </div>
-              <div>
-                <label className={label} htmlFor="r-desig">Your Designation *</label>
-                <input id="r-desig" className={field} value={f.designation} onChange={set("designation")} />
-              </div>
-              <div>
-                <label className={label} htmlFor="r-org">Organization Name *</label>
-                <input id="r-org" className={field} value={f.company} onChange={set("company")} />
-              </div>
-              <div>
-                <label className={label} htmlFor="r-loc">Organization Location *</label>
-                <input id="r-loc" className={field} value={f.location} onChange={set("location")} />
-              </div>
-              <div>
-                <label className={label} htmlFor="r-emp">What is your employee count *</label>
-                <select id="r-emp" className={field} value={f.employeeCount} onChange={set("employeeCount")}>
-                  <option value="">Select…</option>
-                  {EMPLOYEE_COUNTS.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
+
+              {!have.designation && (
+                <div>
+                  <label className={label} htmlFor="r-desig">Your Designation *</label>
+                  <select id="r-desig" className={field} value={f.designation} onChange={set("designation")}>
+                    <option value="">Select…</option>
+                    {DESIGNATIONS.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {!have.company && (
+                <div>
+                  <label className={label} htmlFor="r-org">Company Name *</label>
+                  <input id="r-org" className={field} value={f.company} onChange={set("company")} />
+                </div>
+              )}
+              {!have.employeeCount && (
+                <div>
+                  <label className={label} htmlFor="r-emp">No. of Employees *</label>
+                  <select id="r-emp" className={field} value={f.employeeCount} onChange={set("employeeCount")}>
+                    <option value="">Select…</option>
+                    {EMPLOYEE_COUNTS.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                 <div>
                   <label className={label} htmlFor="r-phone">Phone (WhatsApp) *</label>
@@ -373,6 +407,21 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
                   <label className={label} htmlFor="r-email">Email *</label>
                   <input id="r-email" type="email" className={field} value={f.email} onChange={set("email")} />
                 </div>
+              </div>
+
+              <div>
+                <label className={label} htmlFor="r-exp">
+                  What are your expectations from this Workshop?{" "}
+                  <span className="font-normal text-brand-charcoal/50">(optional)</span>
+                </label>
+                <textarea
+                  id="r-exp"
+                  rows={3}
+                  className={`${field} resize-y`}
+                  placeholder="What would make this worth your Friday afternoon?"
+                  value={f.expectations}
+                  onChange={set("expectations")}
+                />
               </div>
 
               {err && <p className="font-sans text-sm text-red-600">{err}</p>}

@@ -80,8 +80,8 @@ that must be correct or nothing works:
 |---|---|
 | `LANDING_BASE_URL` | **The public HTTPS origin, no trailing slash.** Every booking and Event Pass link we send is built from this. If it is wrong, every link we send is dead. |
 | `SHEET_ID` | The Google Sheet holding the leads |
-| `SHEET_FORM_TAB` | Tab the Meta connector writes to (we only ever **read** it) |
-| `SHEET_AUTOMATION_TAB` | Tab we own — all booking state lives here |
+| `SHEET_FORM_TAB` | Tab(s) the Meta connector writes to — we only ever **read** them. **Comma-separated:** each Instant Form gets its own connection and its own tab, so a new form means a new tab. List the old one alongside the new one while an ad swaps over and nothing is dropped in between; leads are deduped globally, so a person in both tabs is still contacted once. |
+| `SHEET_AUTOMATION_TAB` | Tab we own — all booking state lives here. We only read and write the columns we know by **name**, so extra columns added by hand (e.g. a calling team's `Status` / `Remarks`) are never touched. It must contain an `expectations` column. |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_PRIVATE_KEY` | Service account. **The sheet must be shared with that email as Editor** — this is the single most common setup mistake. |
 | `AZURE_*` / `GRAPH_SENDER_UPN` | Sends email as the workshop mailbox. Needs `Mail.Send` **application** permission, scoped to that one mailbox by an Application Access Policy. |
 | `WATI_API_ENDPOINT` / `WATI_ACCESS_TOKEN` | WhatsApp. Template names are overridable via `WATI_TPL_WA*`. |

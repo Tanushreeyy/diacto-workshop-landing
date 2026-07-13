@@ -23,8 +23,18 @@ export const env = {
   // Private key is stored with escaped newlines in most hosts' env UIs.
   googlePrivateKey: () => req("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n"),
   sheetId: () => req("SHEET_ID"),
-  // Meta's connector owns the form tab — we only ever READ it.
-  formTab: () => opt("SHEET_FORM_TAB", "v2_form"),
+  // Meta's connector owns the form tabs — we only ever READ them.
+  //
+  // Comma-separated, because a new Instant Form gets a NEW connection and so a
+  // NEW tab: "Sheet2,v3_form". Ingesting from both means there is no cutover
+  // window where a submission to the outgoing form is silently dropped. Dedupe
+  // is global (lead_id + phone_key across the automation tab), so a lead can
+  // never be ingested twice no matter how many tabs are listed.
+  formTabs: () =>
+    opt("SHEET_FORM_TAB", "v2_form")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean),
   autoTab: () => opt("SHEET_AUTOMATION_TAB", "automation"),
 
   // WhatsApp (WATI)

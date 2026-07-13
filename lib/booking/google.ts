@@ -48,12 +48,19 @@ export function cell(table: Table, row: SheetRow, header: string): string {
   return i === undefined ? "" : row.cells[i] ?? "";
 }
 
-// Find the real header name from a list of candidates (case/space tolerant).
-// Lets us survive the form's odd column names ("your_name:") and any renames.
+// Find the real header name from a list of candidates.
+//
+// Meta names a form column after the question text, and the exact punctuation is
+// not ours to control: "No. of Employees", "no_of_employees:", "Company Name" have
+// all shown up. We compare on letters+digits only, so every one of those collapses
+// to the same key. Matching stays EXACT on that key (never substring), so "name"
+// can't accidentally claim the "company_name" column.
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
 export function resolveHeader(table: Table, candidates: string[]): string | null {
-  const lower = new Map(table.header.map((h) => [h.trim().toLowerCase(), h]));
+  const byKey = new Map(table.header.map((h) => [norm(h), h]));
   for (const c of candidates) {
-    const hit = lower.get(c.trim().toLowerCase());
+    const hit = byKey.get(norm(c));
     if (hit) return hit;
   }
   return null;
