@@ -63,11 +63,15 @@ const A = {
 // ---- form tabs (Meta's) — resolved by candidate names ----
 // Header matching ignores case and punctuation (see resolveHeader), so one
 // candidate covers "Company Name", "company_name" and "company_name:" alike.
-const FORM = {
+export const FORM = {
   id: ["id"],
   name: ["full_name", "your_name", "name"],
   email: ["email", "email_address"],
-  phone: ["phone", "phone_number"],
+  // Meta names the column after the question, so this varies per form: the v2 tab
+  // calls it "phone", the v3 tab calls it "whatsapp_number". Miss it and the lead
+  // ingests with no phone at all — no WhatsApp, no phone_key to dedupe on, and the
+  // landing page's phone lookup can never find them.
+  phone: ["phone", "phone_number", "whatsapp_number", "whatsapp", "mobile_number", "mobile"],
   // Added by the v3 form (Snehal's qualifying questions). Absent from the older
   // form's tab — resolveHeader returns null there and ingest just leaves them blank.
   designation: ["designation", "your_designation", "what_is_your_designation"],
@@ -79,6 +83,8 @@ const FORM = {
     "employees",
     "company_size",
   ],
+  // The form still collects this even though the landing page no longer asks for it.
+  location: ["organization_location", "organisation_location", "location", "city"],
 };
 
 const isDone = (v: string) => (v || "").trim().toUpperCase() === "TRUE";
@@ -380,6 +386,7 @@ interface FormLead {
   designation: string;
   company: string;
   employeeCount: string;
+  location: string;
 }
 
 async function ingestLead(auto: Table, l: FormLead): Promise<void> {
@@ -396,6 +403,7 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
     [A.designation]: l.designation,
     [A.company]: l.company,
     [A.employeeCount]: l.employeeCount,
+    [A.location]: l.location,
     [A.phone]: e164,
     [A.phoneKey]: phoneKey(l.phone),
     [A.email]: l.email,
@@ -611,6 +619,7 @@ export async function runTick(): Promise<TickSummary> {
     const cDesig = resolveHeader(form, FORM.designation);
     const cCompany = resolveHeader(form, FORM.company);
     const cEmp = resolveHeader(form, FORM.employeeCount);
+    const cLoc = resolveHeader(form, FORM.location);
     const get = (fr: SheetRow, col: string | null) => (col ? cell(form, fr, col) : "");
 
     for (const fr of form.rows) {
@@ -631,6 +640,7 @@ export async function runTick(): Promise<TickSummary> {
           designation: get(fr, cDesig),
           company: get(fr, cCompany),
           employeeCount: get(fr, cEmp),
+          location: get(fr, cLoc),
         });
         knownIds.add(leadId);
         if (phone) knownPhones.add(phoneKey(phone));

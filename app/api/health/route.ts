@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/booking/env";
 import { readTable, resolveHeader } from "@/lib/booking/google";
+import { FORM } from "@/lib/booking/service";
 import { WORKSHOP, WA_TEMPLATES, REMINDERS } from "@/lib/booking/config";
 
 export const runtime = "nodejs";
@@ -66,18 +67,25 @@ async function checkSheet(): Promise<Check> {
 async function checkFormTabs(): Promise<Check> {
   const tabs = env.formTabs();
   if (!tabs.length) return { name: "form_tabs", ok: false, detail: "SHEET_FORM_TAB is empty" };
+  // Resolved against the SAME candidate lists ingest uses (FORM), so this can never
+  // drift from reality. name/email/phone are load-bearing: Meta names columns after
+  // the question text, so a reworded form silently renames them — and a lead with no
+  // phone gets no WhatsApp and cannot be looked up. That FAILS the check, not a note.
   const results = await Promise.all(
     tabs.map(async (t) => {
       try {
         const f = await readTable(t);
-        const has = (c: string[]) => (resolveHeader(f, c) ? "y" : "-");
-        return `${t}: ${f.rows.length} row(s) [desig ${has(["designation"])} · company ${has(["company_name", "company"])} · emp ${has(["no_of_employees", "number_of_employees", "employee_count"])}]`;
+        const has = (c: string[]) => !!resolveHeader(f, c);
+        const missing = (["name", "email", "phone"] as const).filter((k) => !has(FORM[k]));
+        const mark = (k: keyof typeof FORM) => (has(FORM[k]) ? "y" : "-");
+        const detail = `${t}: ${f.rows.length} row(s) [desig ${mark("designation")} · company ${mark("company")} · emp ${mark("employeeCount")} · loc ${mark("location")}]`;
+        return missing.length ? `${detail} MISSING REQUIRED: ${missing.join(", ")}` : detail;
       } catch {
         return `${t}: UNREADABLE`;
       }
     }),
   );
-  const bad = results.filter((r) => r.includes("UNREADABLE"));
+  const bad = results.filter((r) => r.includes("UNREADABLE") || r.includes("MISSING REQUIRED"));
   return {
     name: "form_tabs",
     ok: bad.length === 0,
