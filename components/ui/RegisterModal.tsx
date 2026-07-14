@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Select from "./Select";
 
 interface Props {
   rid: string | null;
@@ -372,12 +373,12 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
               {!have.designation && (
                 <div>
                   <label className={label} htmlFor="r-desig">Your Designation *</label>
-                  <select id="r-desig" className={field} value={f.designation} onChange={set("designation")}>
-                    <option value="">Select…</option>
-                    {DESIGNATIONS.map((d) => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
+                  <Select
+                    id="r-desig"
+                    value={f.designation}
+                    onChange={(v) => setF((p) => ({ ...p, designation: v }))}
+                    options={DESIGNATIONS}
+                  />
                 </div>
               )}
               {!have.company && (
@@ -389,12 +390,12 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
               {!have.employeeCount && (
                 <div>
                   <label className={label} htmlFor="r-emp">No. of Employees *</label>
-                  <select id="r-emp" className={field} value={f.employeeCount} onChange={set("employeeCount")}>
-                    <option value="">Select…</option>
-                    {EMPLOYEE_COUNTS.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                  <Select
+                    id="r-emp"
+                    value={f.employeeCount}
+                    onChange={(v) => setF((p) => ({ ...p, employeeCount: v }))}
+                    options={EMPLOYEE_COUNTS}
+                  />
                 </div>
               )}
 
