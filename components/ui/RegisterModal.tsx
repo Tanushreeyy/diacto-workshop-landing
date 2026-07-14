@@ -20,6 +20,7 @@ interface Fields {
   designation: string;
   company: string;
   employeeCount: string;
+  location: string;
   phone: string;
   email: string;
   expectations: string;
@@ -29,6 +30,7 @@ const EMPTY: Fields = {
   designation: "",
   company: "",
   employeeCount: "",
+  location: "",
   phone: "",
   email: "",
   expectations: "",
@@ -38,8 +40,8 @@ const EMPTY: Fields = {
 // when we don't already have them. That is decided PER FIELD, not per lead:
 // leads captured by the older form are "known" yet have no designation/company,
 // and hiding the fields for them would drop the answers on the floor.
-type Qualifier = "designation" | "company" | "employeeCount";
-const QUALIFIERS: Qualifier[] = ["designation", "company", "employeeCount"];
+type Qualifier = "designation" | "company" | "employeeCount" | "location";
+const QUALIFIERS: Qualifier[] = ["designation", "company", "employeeCount", "location"];
 
 type Step = "loading" | "phone" | "form" | "already" | "success";
 
@@ -69,6 +71,7 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
     designation: false,
     company: false,
     employeeCount: false,
+    location: false,
   });
   const [already, setAlready] = useState<{ regId: string; passUrl?: string } | null>(null);
   const [success, setSuccess] = useState<{ name: string; regId: string; passUrl?: string } | null>(null);
@@ -100,6 +103,7 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
       designation: p.designation || "",
       company: p.company || "",
       employeeCount: p.employeeCount || "",
+      location: p.location || "",
       phone: p.phone || typedPhone || "",
       email: p.email || "",
       expectations: "",
@@ -108,6 +112,7 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
       designation: !!p.designation,
       company: !!p.company,
       employeeCount: !!p.employeeCount,
+      location: !!p.location,
     });
     setStep("form");
   }, []);
@@ -395,6 +400,18 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
                     value={f.employeeCount}
                     onChange={(v) => setF((p) => ({ ...p, employeeCount: v }))}
                     options={EMPLOYEE_COUNTS}
+                  />
+                </div>
+              )}
+              {!have.location && (
+                <div>
+                  <label className={label} htmlFor="r-loc">Organization Location *</label>
+                  <input
+                    id="r-loc"
+                    className={field}
+                    placeholder="City"
+                    value={f.location}
+                    onChange={set("location")}
                   />
                 </div>
               )}
