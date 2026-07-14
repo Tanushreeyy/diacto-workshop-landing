@@ -123,6 +123,14 @@ export const registrationLink = (token: string) =>
 const passUrl = (token: string) =>
   `${env.landingBaseUrl()}/api/pass?rid=${encodeURIComponent(token)}`;
 
+// "failed WA-1" tells you nothing you can act on. The thrown error already carries
+// the provider's status and response body (see wati.ts / graph.ts) — keep it, on one
+// line, so the Slack alert says whether it was credits, auth, or a paused template.
+function failure(label: string, e: unknown): string {
+  const why = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
+  return why ? `${label} — ${why.slice(0, 180)}` : label;
+}
+
 function ctxFor(name: string, token: string, regId?: string): MsgCtx {
   return {
     firstName: firstNameOf(name),
@@ -216,7 +224,7 @@ async function sendConfirmation(
       });
       sent.push("WA-5");
     } catch (e) {
-      failed.push("WA-5");
+      failed.push(failure("WA-5", e));
       console.error(`[register] WA-5 failed for ${regId}:`, e);
     }
   }
@@ -242,7 +250,7 @@ async function sendConfirmation(
       });
       sent.push("EM-5 (+pass)");
     } catch (e) {
-      failed.push("EM-5");
+      failed.push(failure("EM-5", e));
       console.error(`[register] EM-5 failed for ${regId}:`, e);
     }
   }
@@ -409,7 +417,7 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
       });
       sent.push("WA-1");
     } catch (e) {
-      failed.push("WA-1");
+      failed.push(failure("WA-1", e));
       console.error(`[ingest] WA-1 failed for ${l.leadId}:`, e);
     }
   }
@@ -419,7 +427,7 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
       await sendMail({ to: l.email, subject, html });
       sent.push("EM-1");
     } catch (e) {
-      failed.push("EM-1");
+      failed.push(failure("EM-1", e));
       console.error(`[ingest] EM-1 failed for ${l.leadId}:`, e);
     }
   }
@@ -453,7 +461,7 @@ async function nurtureLead(auto: Table, row: SheetRow): Promise<void> {
       });
       sent.push(tpl);
     } catch (e) {
-      failed.push(tpl);
+      failed.push(failure(tpl, e));
       console.error(`[nurture] WA failed:`, e);
     }
   }
@@ -463,7 +471,7 @@ async function nurtureLead(auto: Table, row: SheetRow): Promise<void> {
       await sendMail({ to: email, subject, html });
       sent.push(emailKind);
     } catch (e) {
-      failed.push(emailKind);
+      failed.push(failure(emailKind, e));
       console.error(`[nurture] email failed:`, e);
     }
   }
@@ -530,7 +538,7 @@ async function remindLead(auto: Table, row: SheetRow): Promise<number> {
       already.add(r.key);
       justSent.push(r.key);
     } catch (e) {
-      failed.push(r.key);
+      failed.push(failure(r.key, e));
       console.error(`[remind] ${r.key} failed:`, e);
     }
   }
