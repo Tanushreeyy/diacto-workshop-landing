@@ -15,6 +15,7 @@ export interface MsgCtx {
   passUrl?: string; // tokenised pass-download link (issued after confirm)
   regId?: string;
   dateLabel: string;
+  dateShort: string; // "Fri, 24 July" — weekday+date, the WhatsApp date variable
   timeLabel: string;
   venue: string;
   mapUrl: string;
@@ -32,28 +33,34 @@ export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: 
     Map_Link: ctx.mapUrl,
     Support_Number: ctx.support,
     Unsubscribe_Link: UNSUBSCRIBE_LINK,
+    // The workshop date was hardcoded in the email HTML; now it's a variable driven
+    // by the same single source as everything else (EVENT_DATE_LABEL / _SHORT), so a
+    // postponement is one env var across WhatsApp, the landing page AND the emails.
+    Event_Date: ctx.dateLabel,
+    Event_Date_Short: ctx.dateShort,
   };
   const fill = (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
   return { subject: fill(tpl.subject), html: fill(tpl.html) };
 }
 
-// WhatsApp template body-variable maps. The venue map + support number are
-// STATIC in the templates (a "Get Directions" URL button + hardcoded text), so
-// the only body variables are:
-//   WA-5…WA-8 : {{1}} first name · {{2}} Event Pass download link
-// WA-1..WA-4 are no longer in the flow (no pending state → no nurture).
+// WhatsApp template body-variable maps. The venue map + support number are STATIC
+// in the templates (a "Get Directions" URL button + hardcoded text). The variables:
+//   WA-1…WA-5 : {{1}} first name · {{2}} date ("Fri, 24 July") · {{3}} link/pass
+//   WA-6…WA-8 : {{1}} first name · {{2}} Event Pass link   (relative time, no date)
+// The date lives in {{2}} — weekday and date together — so postponing the workshop
+// is a single env var (EVENT_DATE_SHORT) and never a template rebuild.
 export function waParamsFor(templateName: string, ctx: MsgCtx): WaParam[] {
+  const T = WA_TEMPLATES;
   const fn: WaParam = { name: "1", value: ctx.firstName };
   // WA-1..4 (not yet registered) point at the registration link;
   // WA-5..8 (registered) point at the Event Pass download.
-  const isPreRegistration =
-    templateName === WA_TEMPLATES.WA1 ||
-    templateName === WA_TEMPLATES.WA2 ||
-    templateName === WA_TEMPLATES.WA3 ||
-    templateName === WA_TEMPLATES.WA4;
-  const link: WaParam = {
-    name: "2",
-    value: isPreRegistration ? ctx.bookingLink : (ctx.passUrl ?? ctx.bookingLink),
-  };
-  return [fn, link];
+  const isPreRegistration = ([T.WA1, T.WA2, T.WA3, T.WA4] as string[]).includes(templateName);
+  const link = isPreRegistration ? ctx.bookingLink : (ctx.passUrl ?? ctx.bookingLink);
+
+  // WA-1…WA-5 print the date, so it rides as {{2}} and the link shifts to {{3}}.
+  const carriesDate = ([T.WA1, T.WA2, T.WA3, T.WA4, T.WA5] as string[]).includes(templateName);
+  if (carriesDate) {
+    return [fn, { name: "2", value: ctx.dateShort }, { name: "3", value: link }];
+  }
+  return [fn, { name: "2", value: link }];
 }

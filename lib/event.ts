@@ -1,13 +1,18 @@
 // Central source of truth for all workshop copy + scheduling.
 // BACKEND INTEGRATION: booking CTA connects to booking workflow later. No backend logic now.
 
+import { WORKSHOP } from "./booking/config";
+
 export const EVENT = {
   title: "How To Hire, Train & Retain Employees",
   subtitle:
     "FREE Practical Workshop for Founders & Business Owners of Private Limited & Limited Companies",
-  venue: "Prabhavee Tech Park, Baner, Pune",
+  venue: WORKSHOP.venue,
   timeLabel: "3:00 PM – 6:00 PM",
-  dayLabel: "This Friday",
+  // Was "This Friday" — ambiguous once the event is more than a week out (this
+  // Friday is the 17th; the workshop is the 24th). Now it shows the explicit date,
+  // driven by the same single source as every message (EVENT_DATE_SHORT).
+  dayLabel: WORKSHOP.dateShort,
   ctaText: "BOOK YOUR FREE SPOT",
 } as const;
 

@@ -1,10 +1,12 @@
 // Orchestration: the booking workflow.
 //
-//   Meta Instant Form (name + phone + email)  →  form tab (connector-owned, READ ONLY)
+//   Meta Instant Form (name + phone + email + location) → form tab (connector-owned, READ ONLY)
 //        │  tick ingests → automation row + token → WA-1 + EM-1 (registration link)
+//        │  The form is deliberately light; the rest (designation, company, employee
+//        │  count, expectations) is collected on the landing page at registration.
 //        │
-//        ├─ taps our link      → landing ?rid=token → PREFILLED, fills 4 fields
-//        ├─ taps Meta's button → landing, enters phone → matched → fills 4 fields
+//        ├─ taps our link      → landing ?rid=token → PREFILLED, asks only what's missing
+//        ├─ taps Meta's button → landing, enters phone → matched → asks only what's missing
 //        └─ never finishes     → WA-2/3/4 + EM-2/3/4 nurture, 10:00 & 17:00 IST
 //
 //   Registration (landing form) → WA-5 + EM-5 with the Event Pass → Slack
@@ -144,6 +146,7 @@ function ctxFor(name: string, token: string, regId?: string): MsgCtx {
     passUrl: passUrl(token),
     regId,
     dateLabel: WORKSHOP.dateLabel,
+    dateShort: WORKSHOP.dateShort,
     timeLabel: WORKSHOP.timeLabel,
     venue: WORKSHOP.venue,
     mapUrl: WORKSHOP.mapUrl,

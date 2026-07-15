@@ -436,7 +436,7 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
                   id="r-exp"
                   rows={3}
                   className={`${field} resize-y`}
-                  placeholder="What would make this worth your Friday afternoon?"
+                  placeholder="What would make this workshop worth your afternoon?"
                   value={f.expectations}
                   onChange={set("expectations")}
                 />
