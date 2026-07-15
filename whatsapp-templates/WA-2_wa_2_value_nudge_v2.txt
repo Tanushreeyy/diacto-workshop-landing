@@ -1,18 +1,22 @@
-Template name : wa_2_value_nudge
+Template name : wa_2_value_nudge_v2
 Category      : Marketing
-Language      : English (en)
+Language      : English (US) · en_US
 
 ────────── HEADER  (type: Text) ──────────
-🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
+HIGH-PERFORMANCE TEAMS WORKSHOP
 
 ────────── BODY ──────────
 Hi {{1}}, your seat for the High-Performance Teams Workshop is still on hold. ⏳
+
 In 3 hours you'll get:
 ✅ The A.S.K. Framework to hire right, every time
 ✅ Scientific Hiring — no more gut-feel decisions
 ✅ Ready-to-use tools & templates
-🗓 Fri, 17 July | 3–6 PM | Baner, Pune | FREE
-Confirm your seat here: {{2}}
+
+🗓 {{2}} | 3–6 PM | Baner, Pune | FREE
+
+Confirm your seat here: {{3}}
+
 Don't miss it — seats are limited. 👇
 
 ────────── FOOTER ──────────
@@ -20,7 +24,8 @@ Diacto Technologies
 
 ────────── VARIABLES / SAMPLE VALUES ──────────
   {{1}} = First name           sample: Priya
-  {{2}} = Booking link         sample: https://diacto-workshop.example.com/?rid=abc123
+  {{2}} = Date                 sample: Fri, 24 July
+  {{3}} = Booking link         sample: https://diacto-workshop.example.com/?rid=abc123
 
 ────────── BUTTONS ──────────
-[URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5
+[URL button · static]  Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

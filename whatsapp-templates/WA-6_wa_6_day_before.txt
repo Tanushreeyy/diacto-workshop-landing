@@ -1,13 +1,15 @@
 Template name : wa_6_day_before
 Category      : Utility
-Language      : English (en)
+Language      : English (US) · en_US
 
 ────────── HEADER  (type: Text) ──────────
-🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
+HIGH-PERFORMANCE TEAMS WORKSHOP
 
 ────────── BODY ──────────
 Hi {{1}}! Tomorrow at 3 PM — High-Performance Teams Workshop, Prabhavee Tech Park, Baner.
+
 📎 Your Event Pass: {{2}}
+
 Check-in opens 2:30 PM. Tap “Get Directions” below. See you there! 🚀
 
 ────────── FOOTER ──────────
@@ -18,4 +20,4 @@ Diacto Technologies
   {{2}} = Event Pass link      sample: https://diacto-workshop.example.com/api/pass?rid=abc123
 
 ────────── BUTTONS ──────────
-[URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5
+[URL button · static]  Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

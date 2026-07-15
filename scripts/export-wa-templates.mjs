@@ -28,7 +28,7 @@ TEMPLATES.forEach((t, i) => {
 
   const txt = `Template name : ${t.name}
 Category      : ${cat(t.category)}
-Language      : English (en)
+Language      : English (US) · en_US
 
 ${headerBlock}
 

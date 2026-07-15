@@ -1,14 +1,17 @@
-Template name : wa_4_urgency_nudge
+Template name : wa_4_urgency_nudge_v2
 Category      : Marketing
-Language      : English (en)
+Language      : English (US) · en_US
 
 ────────── HEADER  (type: Text) ──────────
-🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
+HIGH-PERFORMANCE TEAMS WORKSHOP
 
 ────────── BODY ──────────
 Hi {{1}}, seats are filling fast — your booking is still incomplete. ⏰
-High-Performance Teams Workshop — Fri, 17 July | 3–6 PM | Baner, Pune | FREE
-Take 30 seconds to confirm here: {{2}}
+
+High-Performance Teams Workshop — {{2}} | 3–6 PM | Baner, Pune | FREE
+
+Take 30 seconds to confirm here: {{3}}
+
 Don't let your seat be released. 👇
 
 ────────── FOOTER ──────────
@@ -16,7 +19,8 @@ Diacto Technologies
 
 ────────── VARIABLES / SAMPLE VALUES ──────────
   {{1}} = First name           sample: Priya
-  {{2}} = Booking link         sample: https://diacto-workshop.example.com/?rid=abc123
+  {{2}} = Date                 sample: Fri, 24 July
+  {{3}} = Booking link         sample: https://diacto-workshop.example.com/?rid=abc123
 
 ────────── BUTTONS ──────────
-[URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5
+[URL button · static]  Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

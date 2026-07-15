@@ -1,14 +1,17 @@
-Template name : wa_1_booking_pending
+Template name : wa_1_booking_pending_v2
 Category      : Marketing
-Language      : English (en)
+Language      : English (US) · en_US
 
 ────────── HEADER  (type: Text) ──────────
-🎯 HIGH-PERFORMANCE TEAMS WORKSHOP
+HIGH-PERFORMANCE TEAMS WORKSHOP
 
 ────────── BODY ──────────
 Hi {{1}} 👋 Thanks for your interest in the High-Performance Teams Workshop — FREE, exclusively for Founders & Business Owners.
-🗓 Fri, 17 July  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune
-⚠️ Your seat is not confirmed yet. Book in 30 seconds here: {{2}}
+
+🗓 {{2}}  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune
+
+⚠️ Your seat is not confirmed yet. Book in 30 seconds here: {{3}}
+
 Tap “Get Directions” below for the venue map. See you there! 🚀
 
 ────────── FOOTER ──────────
@@ -16,7 +19,8 @@ Diacto Technologies
 
 ────────── VARIABLES / SAMPLE VALUES ──────────
   {{1}} = First name           sample: Priya
-  {{2}} = Booking link         sample: https://diacto-workshop.example.com/?rid=abc123
+  {{2}} = Date                 sample: Fri, 24 July
+  {{3}} = Booking link         sample: https://diacto-workshop.example.com/?rid=abc123
 
 ────────── BUTTONS ──────────
-[URL button · static]  📍 Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5
+[URL button · static]  Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

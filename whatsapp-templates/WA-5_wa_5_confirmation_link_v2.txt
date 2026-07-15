@@ -1,4 +1,4 @@
-Template name : wa_7_morning_of
+Template name : wa_5_confirmation_link_v2
 Category      : Utility
 Language      : English (US) · en_US
 
@@ -6,18 +6,21 @@ Language      : English (US) · en_US
 HIGH-PERFORMANCE TEAMS WORKSHOP
 
 ────────── BODY ──────────
-Good morning {{1}}! ☀️ The High-Performance Teams Workshop is today at 3 PM — doors open 2:30 PM, Prabhavee Tech Park, Baner.
+🎉 Congratulations {{1}}! Your seat for the High-Performance Teams Workshop is CONFIRMED.
 
-📎 Your Event Pass: {{2}}
+🗓 {{2}}  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune
 
-Friday traffic in Baner — leave early! Tap “Get Directions” below. ✅
+📎 Your Event Pass: {{3}}
+
+Also emailed to you — carry it (digital or print) for entry. Tap “Get Directions” below. See you there! 🚀
 
 ────────── FOOTER ──────────
 Diacto Technologies
 
 ────────── VARIABLES / SAMPLE VALUES ──────────
   {{1}} = First name           sample: Priya
-  {{2}} = Event Pass link      sample: https://diacto-workshop.example.com/api/pass?rid=abc123
+  {{2}} = Date                 sample: Fri, 24 July
+  {{3}} = Event Pass link      sample: https://diacto-workshop.example.com/api/pass?rid=abc123
 
 ────────── BUTTONS ──────────
 [URL button · static]  Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5
