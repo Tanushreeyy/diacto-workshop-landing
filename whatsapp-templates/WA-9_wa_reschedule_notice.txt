@@ -1,0 +1,32 @@
+Template name : wa_reschedule_notice
+Category      : Utility
+Language      : English (US) · en_US
+
+────────── HEADER  (type: Text) ──────────
+HIGH-PERFORMANCE TEAMS WORKSHOP
+
+────────── BODY ──────────
+Hi {{1}} 👋 An update for you as a confirmed attendee.
+
+The High-Performance Teams Workshop has been rescheduled:
+❌ Old: Fri, 17 July
+✅ New: {{2}}  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune
+
+🎫 Your Event Pass has been updated with the new date. Download it here: {{3}}
+
+⚠️ Please use this new pass at check-in — your old pass (17 July) is no longer valid.
+
+Your seat remains 100% confirmed. Questions? Call/WhatsApp +91 7387731069.
+
+See you there! 🚀
+
+────────── FOOTER ──────────
+Diacto Technologies
+
+────────── VARIABLES / SAMPLE VALUES ──────────
+  {{1}} = First name           sample: Priya
+  {{2}} = Date                 sample: Fri, 24 July
+  {{3}} = Event Pass link      sample: https://diacto-workshop.example.com/api/pass?rid=abc123
+
+────────── BUTTONS ──────────
+[URL button · static]  Get Directions  →  https://maps.app.goo.gl/MtpixrnbfgNFHYku5

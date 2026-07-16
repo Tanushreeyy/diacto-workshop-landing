@@ -165,6 +165,27 @@ export const TEMPLATES = [
       "📎 Your Event Pass: {{2}}\n\n" +
       `Show it at check-in. Need help? Call ${SUPPORT}. Tap “Get Directions” below. 🚀`,
   },
+  {
+    // One-time BROADCAST to already-confirmed attendees announcing the postponement.
+    // Not part of the automated ladder — sent by hand via WATI Broadcast (pick this
+    // template, upload the confirmed-attendee list, fill the variables). Same 3-var
+    // shape as WA-5 ({{2}} the new date, {{3}} the pass link); the OLD date is a static
+    // literal (it's a one-off historical fact). UTILITY: an update to an existing booking.
+    name: "wa_reschedule_notice",
+    category: "UTILITY",
+    labels: V_PASS_DATE,
+    example: [EX_NAME, EX_DATE, EX_PASS],
+    rebuild: true,
+    body:
+      "Hi {{1}} 👋 An update for you as a confirmed attendee.\n\n" +
+      "The High-Performance Teams Workshop has been rescheduled:\n" +
+      "❌ Old: Fri, 17 July\n" +
+      "✅ New: {{2}}  |  🕒 3–6 PM  |  📍 Prabhavee Tech Park, Baner, Pune\n\n" +
+      "🎫 Your Event Pass has been updated with the new date. Download it here: {{3}}\n\n" +
+      "⚠️ Please use this new pass at check-in — your old pass (17 July) is no longer valid.\n\n" +
+      `Your seat remains 100% confirmed. Questions? Call/WhatsApp ${SUPPORT}.\n\n` +
+      "See you there! 🚀",
+  },
 ];
 
 // ─────────────────────────── Meta Graph payload ───────────────────────────

@@ -30,6 +30,10 @@ export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: 
   const vars: Record<string, string> = {
     First_Name: ctx.firstName,
     Booking_Link: ctx.bookingLink,
+    // The tokenised pass-download link (issued after confirm). Used by the reschedule
+    // notice (EM-9) so attendees can pull a fresh pass carrying the new date. Falls
+    // back to the booking link if a pass URL wasn't threaded through.
+    Updated_Pass_Link: ctx.passUrl ?? ctx.bookingLink,
     Map_Link: ctx.mapUrl,
     Support_Number: ctx.support,
     Unsubscribe_Link: UNSUBSCRIBE_LINK,
