@@ -67,7 +67,7 @@ const A = {
 // candidate covers "Company Name", "company_name" and "company_name:" alike.
 export const FORM = {
   id: ["id"],
-  name: ["full_name", "your_name", "name"],
+  name: ["full_name", "your_name", "your_full_name", "name"],
   email: ["email", "email_address"],
   // Meta names the column after the question, so this varies per form: the v2 tab
   // calls it "phone", the v3 tab calls it "whatsapp_number". Miss it and the lead
@@ -85,8 +85,15 @@ export const FORM = {
     "employees",
     "company_size",
   ],
-  // The form still collects this even though the landing page no longer asks for it.
-  location: ["organization_location", "organisation_location", "location", "city"],
+  // The new Instant Form (Campaign2 tab) phrases it "where_are_you_based?"; the older
+  // forms used "organization_location". The landing page prefills + hides it either way.
+  location: [
+    "organization_location",
+    "organisation_location",
+    "where_are_you_based",
+    "location",
+    "city",
+  ],
 };
 
 const isDone = (v: string) => (v || "").trim().toUpperCase() === "TRUE";
