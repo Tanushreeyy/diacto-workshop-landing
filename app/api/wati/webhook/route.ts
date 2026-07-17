@@ -89,8 +89,8 @@ export async function POST(req: NextRequest) {
     ).catch(() => {});
   } else {
     const note = result.alreadyOut
-      ? `already unsubscribed — left as-is`
-      : `*follow-ups stopped* (they replied)`;
+      ? `already opted out — left as-is`
+      : `*all messages stopped* (they replied)`;
     await notifySlack(
       `:speech_balloon: *${who}* replied on WhatsApp — ${note}. Message: "${preview}"`,
     ).catch(() => {});

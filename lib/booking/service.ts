@@ -726,19 +726,16 @@ export async function runTick(): Promise<TickSummary> {
     if (outOfTime()) { summary.truncated = true; break; }
     if (!cell(auto, row, A.token)) continue;
 
-    // Opt-out gate — one place, both channels. "unsubscribe"/"duplicate" silence
-    // everything; "reply" only stops the chasing, so a registered attendee who
-    // messaged us still gets their event-day reminders. Order matters: this sits
-    // BEFORE the isDone branch so it governs reminders too.
-    const optOut = cell(auto, row, A.optedOut).trim().toLowerCase();
+    // Opt-out gate — one place, both channels. ANY opt-out reason silences
+    // everything, reminders included: once someone has replied or unsubscribed we
+    // stop messaging them, full stop. The reason (reply / unsubscribe / duplicate)
+    // is kept for audit + Slack, not for different behaviour. Sits BEFORE the
+    // isDone branch so it governs reminders too.
+    const optOut = cell(auto, row, A.optedOut).trim();
     const registered = isDone(cell(auto, row, A.done));
-    if (optOut === OPT_OUT.unsubscribe || optOut === OPT_OUT.duplicate) {
+    if (optOut) {
       summary.suppressed++;
       continue;
-    }
-    if (optOut === OPT_OUT.reply && !registered) {
-      summary.suppressed++;
-      continue; // reply stops nurture; a registered replier keeps reminders
     }
 
     try {

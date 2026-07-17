@@ -55,14 +55,12 @@ export const WA_NURTURE_LADDER = [
 
 // ---- opt-out ----------------------------------------------------------------
 //
-// Why the reason is stored rather than a bare TRUE: the two triggers must not do
-// the same thing. A reply means "a human is talking to us now" — stop CHASING
-// them, but a registered attendee who says "see you there" must not thereby lose
-// the reminder for the workshop they signed up for. An unsubscribe is a consent
-// signal and stops everything, reminders included.
+// Any opt-out reason stops ALL messaging (nurture AND reminders) — once a person
+// has replied or unsubscribed we go quiet, full stop. The reason is stored rather
+// than a bare TRUE only for audit and Slack context, not for different behaviour.
 export const OPT_OUT = {
-  reply: "reply", // inbound message — stops nurture only
-  unsubscribe: "unsubscribe", // explicit opt-out — stops everything
+  reply: "reply", // inbound message (recorded manually on Growth, or via webhook)
+  unsubscribe: "unsubscribe", // explicit opt-out (email link or STOP word)
   duplicate: "duplicate", // a raced/duplicate row retired by reconcile
 } as const;
 export type OptOutReason = (typeof OPT_OUT)[keyof typeof OPT_OUT];
