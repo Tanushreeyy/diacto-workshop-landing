@@ -53,6 +53,40 @@ export const WA_NURTURE_LADDER = [
   WA_TEMPLATES.WA4,
 ] as const;
 
+// ---- opt-out ----------------------------------------------------------------
+//
+// Why the reason is stored rather than a bare TRUE: the two triggers must not do
+// the same thing. A reply means "a human is talking to us now" — stop CHASING
+// them, but a registered attendee who says "see you there" must not thereby lose
+// the reminder for the workshop they signed up for. An unsubscribe is a consent
+// signal and stops everything, reminders included.
+export const OPT_OUT = {
+  reply: "reply", // inbound message — stops nurture only
+  unsubscribe: "unsubscribe", // explicit opt-out — stops everything
+  duplicate: "duplicate", // a raced/duplicate row retired by reconcile
+} as const;
+export type OptOutReason = (typeof OPT_OUT)[keyof typeof OPT_OUT];
+
+// Inbound WhatsApp text that means "stop", matched case-insensitively against the
+// whole trimmed message so "stop" opts out but "please stop sending at 9am, call
+// me at 5" does not (that is a reply, and a human should read it).
+export const STOP_WORDS = [
+  "stop",
+  "unsubscribe",
+  "unsub",
+  "opt out",
+  "optout",
+  "remove me",
+  "do not contact",
+  "dont contact",
+  "leave me alone",
+];
+
+export function classifyInbound(text: string): OptOutReason {
+  const t = (text || "").trim().toLowerCase().replace(/[.!]+$/, "");
+  return STOP_WORDS.includes(t) ? OPT_OUT.unsubscribe : OPT_OUT.reply;
+}
+
 export type ReminderKind = "email" | "wa";
 
 export interface ReminderSpec {

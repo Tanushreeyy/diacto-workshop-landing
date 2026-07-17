@@ -3,6 +3,7 @@ import { env } from "@/lib/booking/env";
 import { readTable, resolveHeader } from "@/lib/booking/google";
 import { FORM } from "@/lib/booking/service";
 import { WORKSHOP, WA_TEMPLATES, REMINDERS } from "@/lib/booking/config";
+import { readSwitches } from "@/lib/booking/control";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -149,13 +150,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
-  const checks = await Promise.all([
-    checkEnv(),
-    checkSheet(),
-    checkFormTabs(),
-    checkGraph(),
-    checkWati(),
-    checkSlack(),
+  const [checks, switches] = await Promise.all([
+    Promise.all([
+      checkEnv(),
+      checkSheet(),
+      checkFormTabs(),
+      checkGraph(),
+      checkWati(),
+      checkSlack(),
+    ]),
+    readSwitches().catch(() => null),
   ]);
   const ok = checks.every((c) => c.ok);
 
@@ -167,6 +171,12 @@ export async function GET(req: NextRequest) {
         landingBaseUrl: env.landingBaseUrl(),
         formTabs: env.formTabs(),
         automationTab: env.autoTab(),
+        controlTab: env.controlTab(),
+        // The live switch state, so a pause is never a guess. null = couldn't read.
+        switches: switches
+          ? { ingest: switches.ingest, nurture: switches.nurture, reminders: switches.reminders, source: switches.source }
+          : "unreadable",
+        watiWebhook: env.watiWebhookSecret() ? "secret set" : "no secret (webhook disabled)",
         eventStartUtc: WORKSHOP.eventStartUtc,
         reminders: REMINDERS.map((r) => `${r.key} @ ${r.at}`),
         tickBudgetMs: env.tickBudgetMs(),

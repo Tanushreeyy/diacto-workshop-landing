@@ -2,7 +2,7 @@
 // are made against the Asia/Kolkata (UTC+05:30) calendar so host timezone and
 // cron-in-UTC never cause a double-shift.
 
-import { REMINDERS, ReminderSpec } from "./config";
+import { REMINDERS, ReminderSpec, WORKSHOP } from "./config";
 
 const IST_OFFSET_MS = (5 * 60 + 30) * 60_000;
 
@@ -52,7 +52,23 @@ export function dueForNurture(lastNudgeAtIso: string, now: Date = new Date()): b
   return lp.hour < currentSlot; // due if the last nudge predates this slot
 }
 
-// Reminders that are past their scheduled time and not yet sent for this lead.
+// How long after its slot a reminder may still go out. Past this it is stale and
+// is skipped rather than sent late. Deliberately SHORTER than the smallest gap
+// between consecutive reminders (morning-of → 2h-before is 4h): if grace exceeded
+// that gap, a late resume or a resubscribe could make two reminders due at once
+// and fire "good morning" back-to-back with "starting in 2 hours". 3h gives ample
+// catch-up for a tick outage while guaranteeing at most one reminder is ever due.
+const REMINDER_GRACE_MS = 3 * 3_600_000;
+
+// Reminders that are due for this lead: past their slot, not yet sent, and still
+// meaningful.
+//
+// The window matters. Without an upper bound a reminder stays due FOREVER once
+// its time passes, and every overdue one fires in the same pass — so a lead who
+// unsubscribes and resubscribes on the day, or a tick that resumes late, gets
+// "it's tomorrow!", "good morning!" and "starting in 2 hours" back to back within
+// seconds. Bounding it means a late resume sends only what is still true, and
+// nothing at all fires once the workshop has started.
 export function dueReminders(
   remindersSentCsv: string,
   now: Date = new Date(),
@@ -64,9 +80,14 @@ export function dueReminders(
       .filter(Boolean),
   );
   const nowMs = now.getTime();
-  return REMINDERS.filter(
-    (r) => !sent.has(r.key) && nowMs >= Date.parse(r.at),
-  );
+  const startMs = Date.parse(WORKSHOP.eventStartUtc);
+  return REMINDERS.filter((r) => {
+    if (sent.has(r.key)) return false;
+    const atMs = Date.parse(r.at);
+    if (nowMs < atMs) return false; // not yet
+    if (nowMs >= startMs) return false; // the workshop is underway — say nothing
+    return nowMs < atMs + REMINDER_GRACE_MS; // still timely
+  });
 }
 
 export function nowIso(now: Date = new Date()): string {

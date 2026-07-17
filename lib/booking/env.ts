@@ -36,6 +36,9 @@ export const env = {
       .map((t) => t.trim())
       .filter(Boolean),
   autoTab: () => opt("SHEET_AUTOMATION_TAB", "automation"),
+  // Kill switches live in the sheet so pausing never needs a deploy. Absent tab
+  // = everything enabled (see control.ts).
+  controlTab: () => opt("SHEET_CONTROL_TAB", "control"),
 
   // WhatsApp (WATI)
   watiEndpoint: () => req("WATI_API_ENDPOINT").replace(/\/+$/, ""),
@@ -48,6 +51,13 @@ export const env = {
   // Native mode needs a WATI template whose media header is a real variable.
   // WATI's UI currently rejects a {{var}} in the header URL, so default is off.
   wa5NativeDoc: () => opt("WA5_NATIVE_DOC", "false") === "true",
+
+  // WATI cannot sign its webhooks — its own setup guide says to "validate
+  // incoming requests" but ships no signature header or shared secret. So the
+  // secret rides in the URL (WATI lets you enter an arbitrary one), exactly like
+  // the cron tick's ?secret=. Without it, anyone who guesses the path could POST
+  // a waId and silence a lead. Unset = the webhook refuses every request.
+  watiWebhookSecret: () => opt("WATI_WEBHOOK_SECRET"),
 
   // Slack
   slackWebhook: () => opt("SLACK_WEBHOOK_URL"),

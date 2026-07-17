@@ -105,7 +105,26 @@ export async function appendRow(
   table: Table,
   values: Record<string, string>,
 ): Promise<number> {
+  // A tab whose header we couldn't read maps EVERY key to nothing, and Sheets
+  // answers `{values:[[]]}` with a cheerful 200 that writes nothing at all. The
+  // caller then carries on to the sends, so a header that moved (a stray sort is
+  // enough) turns ingest into a resend loop against a table it never wrote to.
+  // Fail closed instead: no header, no write, no send.
+  if (!table.header.length) {
+    throw new Error(
+      `appendRow: tab '${table.tab}' has no header row — refusing to append (a blank/moved header means dedupe is dead)`,
+    );
+  }
   const row = table.header.map((h) => values[h] ?? "");
+  // Every value we were handed must land somewhere. A key with no matching
+  // header is silently dropped by the map above — that is how rows were appended
+  // without their lead_id once the header's first cell got blanked.
+  const unmapped = Object.keys(values).filter((k) => !(k in table.index));
+  if (unmapped.length) {
+    throw new Error(
+      `appendRow: tab '${table.tab}' is missing column(s) ${unmapped.join(", ")} — refusing to append a row that would silently lose them`,
+    );
+  }
   const res = await jwt().request<{ updates?: { updatedRange?: string } }>({
     url: `${API}/${env.sheetId()}/values/${encodeURIComponent(table.tab)}!A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     method: "POST",

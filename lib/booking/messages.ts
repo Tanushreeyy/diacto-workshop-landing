@@ -13,6 +13,7 @@ export interface MsgCtx {
   firstName: string;
   bookingLink: string; // tokenised confirm link
   passUrl?: string; // tokenised pass-download link (issued after confirm)
+  unsubscribeUrl?: string; // tokenised one-click unsubscribe (confirm page)
   regId?: string;
   dateLabel: string;
   dateShort: string; // "Fri, 24 July" — weekday+date, the WhatsApp date variable
@@ -22,7 +23,10 @@ export interface MsgCtx {
   support: string;
 }
 
-const UNSUBSCRIBE_LINK = `mailto:${WORKSHOP.unsubscribeEmail}?subject=Unsubscribe%20-%20Workshop`;
+// Fallback only. Real emails carry a per-lead tokenised link (ctx.unsubscribeUrl)
+// that opts them out in one click via a confirm page — a mailto forces them to
+// compose an email nobody may action, and stops nothing automatically.
+const UNSUBSCRIBE_FALLBACK = `mailto:${WORKSHOP.unsubscribeEmail}?subject=Unsubscribe%20-%20Workshop`;
 
 // Render a designed email template with this lead's values.
 export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: string } {
@@ -36,7 +40,7 @@ export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: 
     Updated_Pass_Link: ctx.passUrl ?? ctx.bookingLink,
     Map_Link: ctx.mapUrl,
     Support_Number: ctx.support,
-    Unsubscribe_Link: UNSUBSCRIBE_LINK,
+    Unsubscribe_Link: ctx.unsubscribeUrl ?? UNSUBSCRIBE_FALLBACK,
     // The workshop date was hardcoded in the email HTML; now it's a variable driven
     // by the same single source as everything else (EVENT_DATE_LABEL / _SHORT), so a
     // postponement is one env var across WhatsApp, the landing page AND the emails.
