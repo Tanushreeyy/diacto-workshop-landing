@@ -11,6 +11,11 @@
 // for the cursor, and a sync that can write both ways eventually writes the
 // wrong way.
 //
+// The callers see our side without any write-back, because their tab is derived
+// from the automation tab and carries the same columns. status, last_reply and
+// last_reply_at therefore reach them the moment their sheet is refreshed — no
+// mirroring, no second copy of the truth to keep aligned.
+//
 // Matching is on lead_id, which is Meta's and stable — all 134 calling rows
 // matched an automation row on the first run. Phone and email are deliberately
 // NOT used as fallbacks: a shared company mailbox or a mistyped number would

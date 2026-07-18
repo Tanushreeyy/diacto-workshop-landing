@@ -22,7 +22,7 @@ import { graphGet } from "./graph";
 import { setOptOut } from "./service";
 import { notifySlack } from "./slack";
 import { readSetting, writeSetting } from "./control";
-import { STATUS, LeadStatus, STOP_WORDS } from "./config";
+import { STATUS, STATUS_SOURCE, LeadStatus, STOP_WORDS } from "./config";
 
 const LAST_CHECK_KEY = "mail_last_checked";
 
@@ -166,7 +166,16 @@ export async function pollMailReplies(): Promise<PollResult> {
 
   for (const [addr, { latest: m, reason }] of Array.from(byPerson.entries())) {
     try {
-      const out = await setOptOut({ email: addr }, reason);
+      const out = await setOptOut(
+        { email: addr },
+        reason,
+        reason === STATUS.unsubscribed
+          ? STATUS_SOURCE.unsubscribe_link
+          : STATUS_SOURCE.reply,
+        // Kept so a caller can see what the person actually said, rather than
+        // only that "something" arrived.
+        `${m.subject || ""} — ${m.bodyPreview || ""}`,
+      );
       if (!out.found) {
         result.unmatched.push(addr);
         continue;

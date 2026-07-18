@@ -87,6 +87,10 @@ const A = {
   status: "status",
   statusAt: "status_at",
   statusSource: "status_source",
+  // What they last wrote back, so the callers can see it without digging
+  // through a shared mailbox. Snippet only — we are not mirroring their inbox.
+  lastReply: "last_reply",
+  lastReplyAt: "last_reply_at",
   // Promotional touches sent to this person today, and the IST day they belong
   // to. Read together: a stale day means the count is zero, so nothing needs
   // resetting at midnight.
@@ -370,6 +374,17 @@ async function registerLeadLocked(input: RegistrationInput): Promise<RegisterRes
     [A.phoneKey]: key,
     [A.email]: input.email,
     [A.expectations]: input.expectations,
+    // Registering is a deliberate act, and it is happening NOW — newer than
+    // whatever stopped this row before. So it clears the stop. A caller's "Junk"
+    // from Tuesday does not get to silence someone who signed up on Wednesday
+    // and is expecting an Event Pass and a reminder.
+    //
+    // This is the one place a status is cleared without a human doing it, which
+    // is why it is tied to registration specifically rather than to any inbound
+    // activity: a reply is ambiguous, filling in the form is not.
+    [A.status]: "",
+    [A.statusAt]: "",
+    [A.statusSource]: "",
     [A.regId]: regId,
     [A.token]: token,
     [A.done]: "TRUE",
@@ -1050,6 +1065,7 @@ export async function setOptOut(
   match: { token?: string; phoneKey?: string; email?: string },
   reason: LeadStatus,
   source: StatusSource = STATUS_SOURCE.reply,
+  replyText?: string,
 ): Promise<OptOutResult> {
   return withSheetLock("setOptOut", async () => {
     const auto = await readTable(env.autoTab());
@@ -1077,11 +1093,16 @@ export async function setOptOut(
     }
     if (current === reason) return { ok: true, found: true, name, reason, alreadyOut: true };
 
-    await updateRow(auto, row.rowNumber, {
+    const fields: Record<string, string> = {
       [A.status]: reason,
       [A.statusAt]: nowIso(),
       [A.statusSource]: source,
-    });
+    };
+    if (replyText) {
+      fields[A.lastReply] = replyText.replace(/\s+/g, " ").trim().slice(0, 300);
+      fields[A.lastReplyAt] = nowIso();
+    }
+    await updateRow(auto, row.rowNumber, fields);
     return { ok: true, found: true, name, reason };
   });
 }
