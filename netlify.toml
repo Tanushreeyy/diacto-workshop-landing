@@ -7,6 +7,26 @@
 [build.environment]
   NODE_VERSION = "20"
 
+  # Netlify fails the build when the VALUE of any site environment variable is
+  # found in the repo or the build output. That is the right default, but it
+  # cannot tell a credential from an identifier, and several of ours are neither
+  # secret nor avoidable:
+  #
+  #   - Tenant/client ids, the sender mailbox, the spreadsheet id and the WATI
+  #     endpoint are identifiers. Microsoft documents client and tenant ids as
+  #     non-sensitive; the secret is the one thing that must never appear, and it
+  #     is listed below as scanned.
+  #   - Tab names and TICK_BUDGET_MS are plain config. Short values like "8000"
+  #     match by coincidence inside vendored third-party code — the deno.land
+  #     bundle shipped by @netlify/plugin-nextjs is where they were found, which
+  #     is not code we wrote or control.
+  #
+  # Everything genuinely secret is deliberately ABSENT from this list and stays
+  # scanned: AZURE_CLIENT_SECRET, GOOGLE_PRIVATE_KEY, WATI_ACCESS_TOKEN,
+  # CRON_SECRET, SLACK_WEBHOOK_URL. If one of those ever trips the scanner, it is
+  # a real leak and the build should fail.
+  SECRETS_SCAN_OMIT_KEYS = "AZURE_TENANT_ID,AZURE_CLIENT_ID,GRAPH_SENDER_UPN,GOOGLE_SERVICE_ACCOUNT_EMAIL,SHEET_ID,SHEET_FORM_TAB,SHEET_AUTOMATION_TAB,SHEET_CONTROL_TAB,WATI_API_ENDPOINT,WATI_TPL_WA8,WATI_WA5_DOC_PARAM,WA5_NATIVE_DOC,TICK_BUDGET_MS,LANDING_BASE_URL"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 

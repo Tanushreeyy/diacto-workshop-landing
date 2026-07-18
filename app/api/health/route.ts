@@ -29,6 +29,11 @@ async function checkEnv(): Promise<Check> {
     "GOOGLE_SERVICE_ACCOUNT_EMAIL",
     "GOOGLE_PRIVATE_KEY",
     "SHEET_ID",
+    // No defaults any more (see env.ts): unset means the deployment cannot say
+    // which tabs it drives, and it used to fall back to the production ones.
+    "SHEET_FORM_TAB",
+    "SHEET_AUTOMATION_TAB",
+    "SHEET_CONTROL_TAB",
     "WATI_API_ENDPOINT",
     "WATI_ACCESS_TOKEN",
     "CRON_SECRET",

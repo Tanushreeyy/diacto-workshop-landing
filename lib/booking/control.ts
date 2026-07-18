@@ -44,9 +44,14 @@ export const ALL_ON: Switches = {
 const isFalse = (v: string) => ["false", "no", "off", "0"].includes(v.trim().toLowerCase());
 
 export async function readSwitches(): Promise<Switches> {
+  // Resolved OUTSIDE the try on purpose. A missing control TAB is a normal state
+  // and falls through to ALL_ON below; a missing SHEET_CONTROL_TAB *variable* is
+  // a misconfiguration, and swallowing it here would silently hand a staging
+  // deployment production's switches. Let that one throw.
+  const tab = env.controlTab();
   let table;
   try {
-    table = await readTable(env.controlTab());
+    table = await readTable(tab);
   } catch {
     return ALL_ON; // tab absent -> unchanged behaviour
   }
@@ -84,8 +89,9 @@ const BASELINE_KEY = "automation_header";
 
 /** Read one control-tab setting. Null when absent or the tab is unreadable. */
 export async function readSetting(key: string): Promise<string | null> {
+  const tab = env.controlTab(); // see readSwitches — missing variable must throw
   try {
-    const table = await readTable(env.controlTab());
+    const table = await readTable(tab);
     const cKey = resolveHeader(table, ["key", "setting", "name"]);
     const cVal = resolveHeader(table, ["value", "enabled", "state"]);
     if (!cKey || !cVal) return null;

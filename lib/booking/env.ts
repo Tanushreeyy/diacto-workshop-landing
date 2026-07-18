@@ -30,15 +30,30 @@ export const env = {
   // window where a submission to the outgoing form is silently dropped. Dedupe
   // is global (lead_id + phone_key across the automation tab), so a lead can
   // never be ingested twice no matter how many tabs are listed.
+  // ── All three tab names are REQUIRED, with no default. ──
+  //
+  // They used to default to "v2_form", "automation" and "control" — the
+  // PRODUCTION tabs. That meant one forgotten variable silently aimed a staging
+  // deployment at live data: it would read the real automation tab, message real
+  // leads through the same WATI number and mailbox, and share production's kill
+  // switches, header baseline and mail watermark. Nothing would look wrong. The
+  // build would pass and the tick would report itself healthy.
+  //
+  // A default is only kind when being wrong is cheap. Here the wrong value is
+  // indistinguishable from the right one until real people receive messages, so
+  // it is better to refuse to start. These getters are lazy, so a missing
+  // variable throws inside the tick, which catches it, sends nothing and reports
+  // the error — and /api/health names the missing variable outright.
   formTabs: () =>
-    opt("SHEET_FORM_TAB", "v2_form")
+    req("SHEET_FORM_TAB")
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean),
-  autoTab: () => opt("SHEET_AUTOMATION_TAB", "automation"),
-  // Kill switches live in the sheet so pausing never needs a deploy. Absent tab
-  // = everything enabled (see control.ts).
-  controlTab: () => opt("SHEET_CONTROL_TAB", "control"),
+  autoTab: () => req("SHEET_AUTOMATION_TAB"),
+  // Kill switches live in the sheet so pausing never needs a deploy. A missing
+  // TAB still means "everything enabled" (control.ts fails open by design); a
+  // missing VARIABLE is a misconfiguration and is refused here.
+  controlTab: () => req("SHEET_CONTROL_TAB"),
 
   // WhatsApp (WATI)
   watiEndpoint: () => req("WATI_API_ENDPOINT").replace(/\/+$/, ""),
