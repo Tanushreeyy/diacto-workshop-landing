@@ -82,6 +82,10 @@ async function sheetsToken() {
   return (await r.json()).access_token;
 }
 
+// Is email deliberately switched off? Decides whether a missing Mail.Send role
+// is a misconfiguration or a choice.
+let emailIntentionallyOff = false;
+
 console.log("\n4. live credential checks");
 let tok;
 try { tok = await sheetsToken(); ok("Google service account authenticates"); }
@@ -111,8 +115,18 @@ if (tok) {
   }
 
   const ctrl = await tab(env.SHEET_CONTROL_TAB);
-  ctrl ? ok(`control tab '${env.SHEET_CONTROL_TAB}' readable`)
-       : warn(`control tab '${env.SHEET_CONTROL_TAB}' not readable — switches default to ON`);
+  if (ctrl) {
+    ok(`control tab '${env.SHEET_CONTROL_TAB}' readable`);
+    const rows = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${env.SHEET_ID}/values/${encodeURIComponent(env.SHEET_CONTROL_TAB)}!A1:B50`,
+      { headers: { Authorization: `Bearer ${tok}` } });
+    if (rows.ok) {
+      const vals = (await rows.json()).values || [];
+      const row = vals.find((v) => (v[0] || "").trim().toLowerCase() === "email_enabled");
+      const off = ["false", "no", "off", "0", "n"].includes((row?.[1] || "").trim().toLowerCase());
+      emailIntentionallyOff = off;
+      if (off) warn("email_enabled=FALSE — the campaign will run WhatsApp-only");
+    }
+  } else warn(`control tab '${env.SHEET_CONTROL_TAB}' not readable — switches default to ON`);
 
   if (env.SHEET_CALLING_TAB) {
     (await tab(env.SHEET_CALLING_TAB)) ? ok(`calling tab '${env.SHEET_CALLING_TAB}' readable`)
@@ -142,7 +156,15 @@ try {
     const claims = JSON.parse(Buffer.from((await r.json()).access_token.split(".")[1], "base64").toString());
     const roles = claims.roles || [];
     ok(`Graph authenticates, roles: ${roles.join(", ") || "none"}`);
-    if (!roles.includes("Mail.Send")) fail("Graph token lacks Mail.Send — no email can be sent");
+    // Missing Mail.Send is only a problem if email is meant to be on. When the
+    // control tab says email_enabled=FALSE the revocation is deliberate — a
+    // second lock on top of the switch — and failing the deploy for it would
+    // block the very configuration someone chose on purpose.
+    if (!roles.includes("Mail.Send")) {
+      emailIntentionallyOff
+        ? warn("Graph token lacks Mail.Send — expected, email_enabled=FALSE in the control tab")
+        : fail("Graph token lacks Mail.Send — no email can be sent, and the control tab does not say that was intended");
+    }
     if (!roles.includes("Mail.Read")) warn("Graph token lacks Mail.Read — email replies will not be detected");
   }
 } catch (e) { fail(`Graph check failed: ${e.message}`); }
