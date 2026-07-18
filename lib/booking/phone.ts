@@ -21,9 +21,62 @@ export function phoneKey(raw: string): string {
   return phoneDigits(raw).slice(-10);
 }
 
+/**
+ * Repair a number that is recoverable WITHOUT guessing.
+ *
+ * People paste numbers that already carry a country code into a field that adds
+ * one, or leave the trunk 0 in, or keep the 00 international prefix. Every one of
+ * those is a redundant prefix: all the subscriber digits are present and we are
+ * only removing something that shouldn't be there.
+ *
+ * What this deliberately does NOT do is guess which digits to drop when there
+ * are simply too many. "+9170574671102" might be 7057467110 with a stray 2, or
+ * it might not — and a wrong guess sends a stranger somebody else's
+ * registration link and Event Pass. Those stay broken and get marked wa_dead for
+ * a human to sort out.
+ *
+ * Returns cleaned digits (no "+"), unchanged if no unambiguous repair exists.
+ */
+export function cleanPhoneDigits(raw: string): string {
+  const d = phoneDigits(raw);
+  if (!d) return "";
+
+  // Every reading of the number that involves only stripping a redundant prefix.
+  const candidates: string[] = [d];
+  let t = d;
+  if (t.startsWith("00")) {
+    t = t.slice(2); // 00 international prefix
+    candidates.push(t);
+  }
+  // Repeated country code: "91 91 7251495666". Only ever strip while more than a
+  // full subscriber number remains, so a genuine 9191xxxxxx mobile is never eaten.
+  while (t.startsWith(DEFAULT_CC) && t.length > 10 + DEFAULT_CC.length) {
+    t = t.slice(DEFAULT_CC.length);
+    candidates.push(t);
+  }
+  // Trunk zero, with or without the country code in front.
+  for (const c of [...candidates]) {
+    if (c.length === 11 && c.startsWith("0")) candidates.push(c.slice(1));
+    if (c.startsWith(DEFAULT_CC + "0") && c.length === 13) {
+      candidates.push(DEFAULT_CC + c.slice(DEFAULT_CC.length + 1));
+    }
+  }
+
+  // Accept a repair only when it lands on an unmistakable Indian mobile: exactly
+  // 10 digits starting 6-9. Ambiguity means no repair.
+  for (const c of candidates) {
+    // A leading "91" is only a country code when something longer than a bare
+    // subscriber number follows it — "9191234567" is a mobile in its own right.
+    const sub =
+      c.length > 10 && c.startsWith(DEFAULT_CC) ? c.slice(DEFAULT_CC.length) : c;
+    if (/^[6-9]\d{9}$/.test(sub)) return DEFAULT_CC + sub;
+  }
+  return d;
+}
+
 /** Canonical E.164 for storage/display: "+919876543210". */
 export function toE164(raw: string, cc: string = DEFAULT_CC): string {
-  let d = phoneDigits(raw);
+  let d = cleanPhoneDigits(raw);
   if (!d) return "";
   if (d.length === 10) {
     d = cc + d; // bare local mobile
@@ -63,7 +116,9 @@ export function isValidPhone(raw: string): boolean {
  * total inside the range.
  */
 export function phoneProblem(raw: string): string | null {
-  const d = phoneDigits(raw);
+  // Judge the number we would actually send to, not the one that was typed —
+  // otherwise a repairable doubled country code gets marked dead for nothing.
+  const d = cleanPhoneDigits(raw);
   if (!d) return "no number";
   if (d.length < 10) return `too short (${d.length} digits)`;
   if (d.length > 15) return `too long (${d.length} digits)`; // E.164 maximum
