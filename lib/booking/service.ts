@@ -41,6 +41,7 @@ import {
 import { withSheetLock } from "./lock";
 import {
   readTable,
+  readCellLive,
   updateRow,
   appendRow,
   cell,
@@ -681,6 +682,23 @@ async function nurtureLead(
   const sent: string[] = [];
   const failed: string[] = [];
 
+  // CLAIM BEFORE SENDING.
+  //
+  // This used to send first and record afterwards, which leaves the one window
+  // that matters: if the write fails after WhatsApp has gone out — a Sheets blip,
+  // a timeout, the process dying — the next tick sees an unchanged row and sends
+  // the same message again. That is precisely the shape of the 17 July incident,
+  // where sends succeeded and state did not persist.
+  //
+  // Recording first inverts the failure: a crash now costs one missed touch
+  // instead of an unbounded resend loop. Given the history, under-sending is the
+  // side to err on — and the person still gets the next touch tomorrow.
+  await updateRow(auto, row.rowNumber, {
+    [A.nurtureStage]: String(stage + 1),
+    [A.lastNudge]: nowIso(),
+  });
+  await recordPromo(ledger, auto, row);
+
   if (phone) {
     try {
       await sendTemplate({
@@ -705,11 +723,6 @@ async function nurtureLead(
     }
   }
 
-  await updateRow(auto, row.rowNumber, {
-    [A.nurtureStage]: String(stage + 1),
-    [A.lastNudge]: nowIso(),
-  });
-  if (sent.length) await recordPromo(ledger, auto, row);
 
   await notifySlack(
     `:bell: *Nudge* (touch ${stage + 1}) — ${name || "Unknown"}` +
@@ -736,6 +749,25 @@ async function remindLead(auto: Table, row: SheetRow): Promise<number> {
   const failed: string[] = [];
 
   for (const r of due) {
+    // CLAIM THIS REMINDER BEFORE SENDING, then release it if the send fails.
+    //
+    // Same reasoning as nurture — recording after the send means a write failure
+    // resends — but the trade is different here, because a missed reminder is
+    // worse than a missed nudge: someone does not turn up to an event they
+    // registered for. So the claim is rolled back on failure, letting the next
+    // tick retry. That retry cannot run away: dueReminders only returns a key
+    // inside a 3-hour window, and never once the workshop has started.
+    already.add(r.key);
+    try {
+      await updateRow(auto, row.rowNumber, {
+        [A.remindersSent]: Array.from(already).join(","),
+      });
+    } catch (e) {
+      already.delete(r.key);
+      failed.push(failure(r.key, e));
+      console.error(`[remind] could not claim ${r.key}, not sending:`, e);
+      continue; // never send something we failed to record
+    }
     try {
       if (r.kind === "email") {
         if (!email) continue;
@@ -765,18 +797,21 @@ async function remindLead(auto: Table, row: SheetRow): Promise<number> {
           parameters: waParamsFor(tpl, ctx),
         });
       }
-      already.add(r.key);
       justSent.push(r.key);
     } catch (e) {
+      // Release the claim so the next tick can try again inside the window.
+      already.delete(r.key);
+      await updateRow(auto, row.rowNumber, {
+        [A.remindersSent]: Array.from(already).join(","),
+      }).catch(() => {
+        // Rollback failed: the key stays claimed and this reminder is lost. Say
+        // so loudly — silently dropping a reminder is the failure nobody notices
+        // until an attendee does not arrive.
+        console.error(`[remind] ${r.key} send FAILED and rollback FAILED — reminder lost`);
+      });
       failed.push(failure(r.key, e));
       console.error(`[remind] ${r.key} failed:`, e);
     }
-  }
-
-  if (justSent.length) {
-    await updateRow(auto, row.rowNumber, {
-      [A.remindersSent]: Array.from(already).join(","),
-    });
   }
   if (justSent.length || failed.length) {
     await notifySlack(
@@ -1027,14 +1062,45 @@ export async function runTick(): Promise<TickSummary> {
     }
 
     try {
+      // Last-moment freshness check, run ONLY for a row we are about to
+      // message. Between the read above and this instant the tick has been
+      // working through other rows, and in that window someone can unsubscribe,
+      // reply, or be marked Junk by a caller. Re-checking the one cell here
+      // narrows the gap from "however long the rest of the tick takes" to a few
+      // hundred milliseconds.
+      //
+      // Deliberately not done for every row: only a handful are due on any given
+      // tick, and a per-row read for all of them would spend the whole time
+      // budget confirming that people we were not going to message are still
+      // people we are not going to message.
+      const stillAllowed = async (): Promise<boolean> => {
+        const live = await readCellLive(auto, row.rowNumber, A.status).catch(
+          () => cell(auto, row, A.status), // a blip must not block a legitimate send
+        );
+        const p = policyFor(live);
+        return registered ? p.reminders : p.nurture;
+      };
+
       if (registered) {
-        if (switches.reminders) summary.remindersSent += await remindLead(auto, row);
+        // dueReminders is consulted first so the live read only happens when
+        // something is actually going out.
+        if (switches.reminders && dueReminders(cell(auto, row, A.remindersSent)).length) {
+          if (!(await stillAllowed())) {
+            summary.suppressed++;
+            continue;
+          }
+          summary.remindersSent += await remindLead(auto, row);
+        }
       } else if (switches.nurture && !quiet && dueForNurture(cell(auto, row, A.lastNudge))) {
         // Hard ceiling on chasing, independent of whatever the schedule thinks.
         // If this ever bites, the schedule and the state disagree — which is the
         // shape every resend incident has taken.
         if (!promoAllowed(ledger, auto, row)) {
           summary.throttled++;
+          continue;
+        }
+        if (!(await stillAllowed())) {
+          summary.suppressed++;
           continue;
         }
         await nurtureLead(auto, row, ledger);

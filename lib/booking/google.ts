@@ -43,6 +43,36 @@ export interface Table {
   rows: SheetRow[];
 }
 
+/**
+ * Re-read ONE cell, live.
+ *
+ * For the last-moment check before a send. The tick reads the whole tab up
+ * front, but people unsubscribe, reply and get marked Junk while it is still
+ * working through the rows — and the message that must never go out is the one
+ * to somebody who just asked us to stop. This is a single-cell fetch, used only
+ * for rows actually about to be messaged (a handful per tick), so it costs a
+ * couple of hundred milliseconds where it matters and nothing where it doesn't.
+ */
+export async function readCellLive(
+  table: Table,
+  rowNumber: number,
+  header: string,
+): Promise<string> {
+  const col = table.index[header];
+  if (col === undefined) return "";
+  // 0-based index -> A1 column letters.
+  let a1 = "";
+  for (let i = col + 1; i > 0; ) {
+    const r = (i - 1) % 26;
+    a1 = String.fromCharCode(65 + r) + a1;
+    i = Math.floor((i - 1) / 26);
+  }
+  const res = await jwt().request<{ values?: string[][] }>({
+    url: `${API}/${env.sheetId()}/values/${encodeURIComponent(table.tab)}!${a1}${rowNumber}`,
+  });
+  return res.data.values?.[0]?.[0] ?? "";
+}
+
 export function cell(table: Table, row: SheetRow, header: string): string {
   const i = table.index[header];
   return i === undefined ? "" : row.cells[i] ?? "";
