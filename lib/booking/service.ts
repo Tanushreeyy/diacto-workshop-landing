@@ -53,6 +53,7 @@ import { emailFor, waParamsFor, MsgCtx } from "./messages";
 import { dueForNurture, dueReminders, isQuietHours, nowIso } from "./schedule";
 import { phoneKey, toE164, isValidPhone, phoneProblem } from "./phone";
 import { samePerson } from "./names";
+import { pollMailReplies } from "./mailReplies";
 
 // ---- automation tab (ours) ----
 const A = {
@@ -784,6 +785,7 @@ export interface TickSummary {
   switches: string; // which switches were in effect this tick
   halted: boolean; // preflight refused to run — the sheet looks damaged
   throttled: number; // rows held back by the per-person daily promo limit
+  repliesStopped: number; // leads opted out this tick because they replied by email
   truncated: boolean; // hit the time budget — the next tick picks up the rest
   errors: string[];
 }
@@ -816,6 +818,7 @@ export async function runTick(): Promise<TickSummary> {
     switches: `ingest=${switches.ingest} nurture=${switches.nurture} reminders=${switches.reminders} [${switches.source}]`,
     halted: false,
     throttled: 0,
+    repliesStopped: 0,
     truncated: false,
     errors: [],
   };
@@ -931,6 +934,21 @@ export async function runTick(): Promise<TickSummary> {
     summary.errors.push(`reconcile: ${(e as Error).message}`);
   }
 
+  // 1c) REPLIES — anyone who has answered by email stops being chased. Runs
+  // BEFORE nurture so a reply that arrived since the last tick takes effect on
+  // this one, rather than one nudge too late. Never allowed to sink the tick:
+  // missing consent degrades to "we stop noticing replies", which is bad, but
+  // not as bad as no reminders going out at all.
+  try {
+    const replies = await pollMailReplies();
+    summary.repliesStopped = replies.optedOut;
+    if (!replies.available) {
+      summary.errors.push("mail replies: Mail.Read not granted — replies unseen");
+    }
+  } catch (e) {
+    summary.errors.push(`mail replies: ${(e as Error).message}`);
+  }
+
   // 2) NURTURE (not yet registered) + REMINDERS (registered).
   const quiet = isQuietHours();
   for (const row of auto.rows) {
@@ -1009,15 +1027,22 @@ export interface OptOutResult {
 // same tab the tick and registration touch. Idempotent: opting out an already-out
 // lead is a no-op that still reports success.
 export async function setOptOut(
-  match: { token?: string; phoneKey?: string },
+  match: { token?: string; phoneKey?: string; email?: string },
   reason: OptOutReason,
 ): Promise<OptOutResult> {
   return withSheetLock("setOptOut", async () => {
     const auto = await readTable(env.autoTab());
+    const em = match.email?.trim().toLowerCase();
+    // Token first (unambiguous), then phone, then email. Email is last because
+    // it is the weakest key: shared company mailboxes mean one address can cover
+    // two people, so it is only used when nothing better identifies them.
     const row =
       (match.token ? auto.rows.find((r) => cell(auto, r, A.token) === match.token) : undefined) ??
       (match.phoneKey
         ? auto.rows.find((r) => cell(auto, r, A.phoneKey) === match.phoneKey)
+        : undefined) ??
+      (em
+        ? auto.rows.find((r) => cell(auto, r, A.email).trim().toLowerCase() === em)
         : undefined);
     if (!row) return { ok: true, found: false };
 

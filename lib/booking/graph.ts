@@ -20,12 +20,41 @@ async function graphToken(): Promise<string> {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
+      // Next patches global fetch and caches responses. An access token is the
+      // one thing that must never come from a cache: a stale one is silently
+      // accepted here and rejected by Graph as expired, which is exactly how
+      // this surfaced — a two-day-old token whose roles claim predated the
+      // Mail.Read grant.
+      cache: "no-store",
     },
   );
   if (!r.ok) throw new Error(`Graph token failed: ${r.status} ${await r.text()}`);
   const j = (await r.json()) as { access_token: string; expires_in?: number };
   cached = { token: j.access_token, exp: Date.now() + (j.expires_in ?? 3599) * 1000 };
   return cached.token;
+}
+
+/**
+ * Read side of Graph. Needs the Mail.Read application permission, granted
+ * 18 July 2026 and scoped by the existing Application Access Policy to
+ * workshop@diacto.com alone.
+ *
+ * Returns null on 403 rather than throwing, so a consent that gets revoked
+ * degrades to "we stop noticing replies" instead of taking the whole tick down
+ * with it. Every other failure throws and is reported normally.
+ */
+export async function graphGet<T>(path: string): Promise<T | null> {
+  const token = await graphToken();
+  const r = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store", // a cached inbox is a missed reply
+  });
+  if (r.status === 403) {
+    console.error(`[graph] 403 on ${path} — is Mail.Read still granted?`);
+    return null;
+  }
+  if (!r.ok) throw new Error(`graphGet ${path} failed: ${r.status} ${await r.text()}`);
+  return (await r.json()) as T;
 }
 
 export interface MailAttachment {
@@ -63,6 +92,7 @@ export async function sendMail(opts: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ message, saveToSentItems: true }),
+      cache: "no-store",
     },
   );
   if (r.status !== 202 && !r.ok) {

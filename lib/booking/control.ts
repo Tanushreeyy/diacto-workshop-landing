@@ -82,33 +82,39 @@ export async function readSwitches(): Promise<Switches> {
 // than one every five minutes.
 const BASELINE_KEY = "automation_header";
 
-export async function readHeaderBaseline(): Promise<string | null> {
+/** Read one control-tab setting. Null when absent or the tab is unreadable. */
+export async function readSetting(key: string): Promise<string | null> {
   try {
     const table = await readTable(env.controlTab());
     const cKey = resolveHeader(table, ["key", "setting", "name"]);
     const cVal = resolveHeader(table, ["value", "enabled", "state"]);
     if (!cKey || !cVal) return null;
     for (const row of table.rows) {
-      if (cell(table, row, cKey).trim().toLowerCase() === BASELINE_KEY) {
+      if (cell(table, row, cKey).trim().toLowerCase() === key.toLowerCase()) {
         return cell(table, row, cVal);
       }
     }
     return null;
   } catch {
-    return null; // no control tab — drift detection is simply unavailable
+    return null;
   }
 }
 
-export async function writeHeaderBaseline(fingerprint: string): Promise<void> {
+/** Write one control-tab setting, creating the row if it isn't there yet. */
+export async function writeSetting(key: string, value: string): Promise<void> {
   const table = await readTable(env.controlTab());
   const cKey = resolveHeader(table, ["key", "setting", "name"]);
   const cVal = resolveHeader(table, ["value", "enabled", "state"]);
   if (!cKey || !cVal) return;
   for (const row of table.rows) {
-    if (cell(table, row, cKey).trim().toLowerCase() === BASELINE_KEY) {
-      await updateRow(table, row.rowNumber, { [cVal]: fingerprint });
+    if (cell(table, row, cKey).trim().toLowerCase() === key.toLowerCase()) {
+      await updateRow(table, row.rowNumber, { [cVal]: value });
       return;
     }
   }
-  await appendRow(table, { [cKey]: BASELINE_KEY, [cVal]: fingerprint });
+  await appendRow(table, { [cKey]: key, [cVal]: value });
 }
+
+export const readHeaderBaseline = () => readSetting(BASELINE_KEY);
+export const writeHeaderBaseline = (fingerprint: string) =>
+  writeSetting(BASELINE_KEY, fingerprint);
