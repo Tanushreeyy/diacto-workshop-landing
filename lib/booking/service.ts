@@ -31,6 +31,8 @@ import {
   readSwitches,
   readHeaderBaseline,
   writeHeaderBaseline,
+  ALL_ON,
+  Switches,
 } from "./control";
 import {
   checkAutomationTable,
@@ -276,7 +278,14 @@ async function sendConfirmation(
   const sent: string[] = [];
   const failed: string[] = [];
 
-  if (l.phone) {
+  // Registration comes in over the web, not through the tick, so the switches
+  // are read here rather than passed down. The channel switches deliberately
+  // cover the Event Pass too: if email is off because the domain is in trouble,
+  // "except this one" is not a useful exception. Fails open — an unreadable
+  // control tab must never block someone's pass.
+  const switches = await readSwitches().catch(() => ALL_ON);
+
+  if (l.phone && switches.whatsapp) {
     try {
       await sendTemplate({
         whatsappNumber: l.phone,
@@ -289,7 +298,7 @@ async function sendConfirmation(
       console.error(`[register] WA-5 failed for ${regId}:`, e);
     }
   }
-  if (l.email) {
+  if (l.email && switches.email) {
     try {
       const pass = await generatePassBase64({
         name: l.name,
@@ -469,6 +478,7 @@ async function ingestLead(
   auto: Table,
   l: FormLead,
   ledger: PromoLedger,
+  switches: Switches,
 ): Promise<void> {
   const token = genToken();
   const e164 = toE164(l.phone);
@@ -542,7 +552,7 @@ async function ingestLead(
   if (waProblem) {
     console.warn(`[ingest] ${l.leadId}: unreachable number ${e164} — ${waProblem}`);
   }
-  if (e164 && !waProblem) {
+  if (e164 && !waProblem && switches.whatsapp) {
     try {
       await sendTemplate({
         whatsappNumber: e164,
@@ -555,7 +565,7 @@ async function ingestLead(
       console.error(`[ingest] WA-1 failed for ${l.leadId}:`, e);
     }
   }
-  if (l.email) {
+  if (l.email && switches.email) {
     try {
       const { subject, html } = emailFor("EM1", ctx);
       await sendMail({ to: l.email, subject, html });
@@ -669,6 +679,7 @@ async function nurtureLead(
   auto: Table,
   row: SheetRow,
   ledger: PromoLedger,
+  switches: Switches,
 ): Promise<void> {
   const name = cell(auto, row, A.name);
   const phone = phoneUsable(auto, row);
@@ -699,7 +710,7 @@ async function nurtureLead(
   });
   await recordPromo(ledger, auto, row);
 
-  if (phone) {
+  if (phone && switches.whatsapp) {
     try {
       await sendTemplate({
         whatsappNumber: phone,
@@ -712,7 +723,7 @@ async function nurtureLead(
       console.error(`[nurture] WA failed:`, e);
     }
   }
-  if (email) {
+  if (email && switches.email) {
     try {
       const { subject, html } = emailFor(emailKind, ctx);
       await sendMail({ to: email, subject, html });
@@ -731,7 +742,11 @@ async function nurtureLead(
   );
 }
 
-async function remindLead(auto: Table, row: SheetRow): Promise<number> {
+async function remindLead(
+  auto: Table,
+  row: SheetRow,
+  switches: Switches,
+): Promise<number> {
   const sentCsv = cell(auto, row, A.remindersSent);
   const due = dueReminders(sentCsv);
   if (!due.length) return 0;
@@ -770,7 +785,7 @@ async function remindLead(auto: Table, row: SheetRow): Promise<number> {
     }
     try {
       if (r.kind === "email") {
-        if (!email) continue;
+        if (!email || !switches.email) continue;
         const kind = r.key === "EM6" ? "EM6" : r.key === "EM7" ? "EM7" : "EM8";
         const { subject, html } = emailFor(kind, ctx);
         const attachments = regId
@@ -784,7 +799,7 @@ async function remindLead(auto: Table, row: SheetRow): Promise<number> {
           : undefined;
         await sendMail({ to: email, subject, html, attachments });
       } else {
-        if (!phone) continue;
+        if (!phone || !switches.whatsapp) continue;
         const tpl =
           r.key === "WA6"
             ? WA_TEMPLATES.WA6
@@ -869,7 +884,9 @@ export async function runTick(): Promise<TickSummary> {
     unreachable: 0,
     formRows: forms.reduce((n, f) => n + (f?.rows.length ?? 0), 0),
     leads: auto.rows.length,
-    switches: `ingest=${switches.ingest} nurture=${switches.nurture} reminders=${switches.reminders} [${switches.source}]`,
+    switches:
+      `ingest=${switches.ingest} nurture=${switches.nurture} reminders=${switches.reminders}` +
+      ` | email=${switches.email} whatsapp=${switches.whatsapp} [${switches.source}]`,
     halted: false,
     throttled: 0,
     repliesStopped: 0,
@@ -965,6 +982,7 @@ export async function runTick(): Promise<TickSummary> {
             location: get(fr, cLoc),
           },
           ledger,
+          switches,
         );
         knownIds.add(leadId);
         if (phone) knownPhones.add(phoneKey(phone));
@@ -1089,7 +1107,7 @@ export async function runTick(): Promise<TickSummary> {
             summary.suppressed++;
             continue;
           }
-          summary.remindersSent += await remindLead(auto, row);
+          summary.remindersSent += await remindLead(auto, row, switches);
         }
       } else if (switches.nurture && !quiet && dueForNurture(cell(auto, row, A.lastNudge))) {
         // Hard ceiling on chasing, independent of whatever the schedule thinks.
@@ -1103,7 +1121,7 @@ export async function runTick(): Promise<TickSummary> {
           summary.suppressed++;
           continue;
         }
-        await nurtureLead(auto, row, ledger);
+        await nurtureLead(auto, row, ledger, switches);
         summary.nurtured++;
       }
     } catch (e) {

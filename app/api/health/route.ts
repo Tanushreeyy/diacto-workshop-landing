@@ -179,7 +179,14 @@ export async function GET(req: NextRequest) {
         controlTab: env.controlTab(),
         // The live switch state, so a pause is never a guess. null = couldn't read.
         switches: switches
-          ? { ingest: switches.ingest, nurture: switches.nurture, reminders: switches.reminders, source: switches.source }
+          ? {
+              ingest: switches.ingest,
+              nurture: switches.nurture,
+              reminders: switches.reminders,
+              email: switches.email,
+              whatsapp: switches.whatsapp,
+              source: switches.source,
+            }
           : "unreadable",
         watiWebhook: env.watiWebhookSecret() ? "secret set" : "no secret (webhook disabled)",
         eventStartUtc: WORKSHOP.eventStartUtc,

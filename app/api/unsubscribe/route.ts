@@ -6,7 +6,7 @@ import {
   clearOptOut,
   optOutStateForToken,
 } from "@/lib/booking/service";
-import { STATUS } from "@/lib/booking/config";
+import { STATUS, STATUS_SOURCE } from "@/lib/booking/config";
 import { notifySlack } from "@/lib/booking/slack";
 
 export const runtime = "nodejs";
@@ -145,7 +145,11 @@ export async function POST(req: NextRequest) {
     return html(page({ title: "Subscribed", heading: `Welcome back, ${name}`, body: "You'll receive workshop updates and reminders again." }));
   }
 
-  const r = await setOptOut({ token: rid }, STATUS.unsubscribed);
+  const r = await setOptOut(
+    { token: rid },
+    STATUS.unsubscribed,
+    STATUS_SOURCE.unsubscribe_link,
+  );
   if (!r.found) return html(page({ title: "Unsubscribe", heading: "Link not recognised", body: "We couldn't find this subscription. It may already be removed." }), 404);
   const name = escapeHtml(r.name || "there");
   notifySlack(`:no_bell: *${r.name || "A lead"}* unsubscribed via email — all messages stopped.`).catch(() => {});

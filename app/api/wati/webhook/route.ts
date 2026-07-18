@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/booking/env";
 import { setOptOut } from "@/lib/booking/service";
-import { classifyInbound, STATUS } from "@/lib/booking/config";
+import { classifyInbound, STATUS, STATUS_SOURCE } from "@/lib/booking/config";
 import { phoneKey } from "@/lib/booking/phone";
 import { notifySlack } from "@/lib/booking/slack";
 
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
 
   let result;
   try {
-    result = await setOptOut({ phoneKey: key }, reason);
+    result = await setOptOut({ phoneKey: key }, reason, STATUS_SOURCE.reply);
   } catch (e) {
     // Never make WATI retry on our internal failure — log and 200.
     console.error("[wati/webhook] setOptOut failed:", e);

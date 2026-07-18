@@ -17,6 +17,13 @@
 //     ingest_enabled      | TRUE     -> WA-1 + EM-1 to brand-new form leads
 //     nurture_enabled     | FALSE    -> WA-2/3/4 + EM-2/3/4 follow-ups
 //     reminders_enabled   | TRUE     -> EM6-8 / WA6-8 on the day
+//     email_enabled       | FALSE    -> silences EVERY email, all stages
+//     whatsapp_enabled    | TRUE     -> silences EVERY WhatsApp, all stages
+//
+// The channel switches are absolute: they cover the Event Pass and the
+// day-of reminders too, not just marketing. That is the point — if a domain is
+// in trouble you want no mail leaving at all, and being surprised by a
+// "transactional" exception is exactly the wrong discovery to make mid-incident.
 //
 // Fail-open is deliberate here, and it is the opposite of the call made in
 // appendRow. A missing/unreadable control tab means ENABLED, so deploying this
@@ -28,9 +35,16 @@ import { readTable, resolveHeader, cell, updateRow, appendRow } from "./google";
 import { env } from "./env";
 
 export interface Switches {
+  // WHAT to send
   ingest: boolean;
   nurture: boolean;
   reminders: boolean;
+  // HOW to send it. Orthogonal to the above on purpose: "stop emailing everyone
+  // but keep WhatsApp running" is a real situation — a deliverability problem, a
+  // domain reputation scare, a client asking for quiet inboxes — and expressing
+  // it by pausing stages would also stop the channel that is working fine.
+  email: boolean;
+  whatsapp: boolean;
   source: string; // where the values came from — surfaced in /api/health
 }
 
@@ -38,6 +52,8 @@ export const ALL_ON: Switches = {
   ingest: true,
   nurture: true,
   reminders: true,
+  email: true,
+  whatsapp: true,
   source: "default (no control tab)",
 };
 
@@ -69,6 +85,8 @@ export async function readSwitches(): Promise<Switches> {
     ingest: on("ingest_enabled"),
     nurture: on("nurture_enabled"),
     reminders: on("reminders_enabled"),
+    email: on("email_enabled"),
+    whatsapp: on("whatsapp_enabled"),
     source: `'${table.tab}' (${map.size} setting(s))`,
   };
 }
