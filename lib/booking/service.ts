@@ -816,11 +816,15 @@ export async function runTick(): Promise<TickSummary> {
   // One tab per live Instant Form. A tab that doesn't exist yet (the next form's
   // connection hasn't run) resolves to null and is simply skipped.
   const tabs = env.formTabs();
-  const [forms, auto, switches] = await Promise.all([
+  const [forms, autoSnapshot, switches] = await Promise.all([
     Promise.all(tabs.map((t) => readTable(t).catch(() => null))),
     readTable(env.autoTab()),
     readSwitches(),
   ]);
+  // Reassignable: the sync and the reply poller below both write statuses, and
+  // the loop that decides who to message must see them. See the re-read after
+  // step 1c.
+  let auto = autoSnapshot;
 
   const summary: TickSummary = {
     ingested: 0,
@@ -980,6 +984,19 @@ export async function runTick(): Promise<TickSummary> {
     }
   } catch (e) {
     summary.errors.push(`mail replies: ${(e as Error).message}`);
+  }
+
+  // Re-read before deciding who to message. The snapshot above was taken before
+  // the caller sync and the reply poller ran, and both of them stop people. On
+  // the stale copy, someone who replied "please stop" this morning would receive
+  // one more nudge and only fall silent on the NEXT tick — the one message that
+  // matters most to get right. One extra read is a small price.
+  if (summary.callerStops || summary.repliesStopped) {
+    try {
+      auto = await readTable(env.autoTab());
+    } catch (e) {
+      summary.errors.push(`re-read after stops: ${(e as Error).message}`);
+    }
   }
 
   // 2) NURTURE (not yet registered) + REMINDERS (registered).
