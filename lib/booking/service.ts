@@ -24,7 +24,18 @@ import {
   OptOutReason,
   isChannelDead,
 } from "./config";
-import { readSwitches } from "./control";
+import {
+  readSwitches,
+  readHeaderBaseline,
+  writeHeaderBaseline,
+} from "./control";
+import {
+  checkAutomationTable,
+  headerFingerprint,
+  detectHeaderDrift,
+  MAX_INGEST_PER_TICK,
+  MAX_NURTURE_PER_TICK,
+} from "./preflight";
 import { withSheetLock } from "./lock";
 import {
   readTable,
@@ -662,6 +673,8 @@ export interface TickSummary {
   formRows: number;
   leads: number;
   switches: string; // which switches were in effect this tick
+  halted: boolean; // preflight refused to run — the sheet looks damaged
+  capped: string[]; // limits that bit this tick (blast-radius ceilings)
   truncated: boolean; // hit the time budget — the next tick picks up the rest
   errors: string[];
 }
@@ -692,9 +705,50 @@ export async function runTick(): Promise<TickSummary> {
     formRows: forms.reduce((n, f) => n + (f?.rows.length ?? 0), 0),
     leads: auto.rows.length,
     switches: `ingest=${switches.ingest} nurture=${switches.nurture} reminders=${switches.reminders} [${switches.source}]`,
+    halted: false,
+    capped: [],
     truncated: false,
     errors: [],
   };
+
+  // 0) PREFLIGHT — is the automation tab still the automation tab?
+  //
+  // Runs before anything is read for sending. A damaged header means dedupe and
+  // suppression are both blind, and a blind tick doesn't send nothing — it sends
+  // everything, to everyone, every five minutes. Bail out and shout.
+  const pre = checkAutomationTable(auto);
+  if (!pre.ok) {
+    summary.errors.push(...pre.problems.map((p) => `preflight: ${p}`));
+    summary.halted = true;
+    await notifySlack(
+      `:octagonal_sign: *TICK HALTED — the automation tab looks damaged.* Nothing was sent.\n` +
+        pre.problems.map((p) => `• ${p}`).join("\n") +
+        `\n\nMost likely someone edited or sorted the sheet by hand. Fix the header row and the next tick resumes on its own. ` +
+        `This is the guard that was missing on 17 July, when a blanked header sent 813 emails to 29 people in three hours.`,
+    );
+    return summary;
+  }
+
+  // Any hand-edit of the header, however harmless, gets reported once. The tick
+  // continues — this is a notification, not a gate; the fatal cases were caught
+  // above. Failure to read or record the baseline must never stop a tick.
+  try {
+    const fingerprint = headerFingerprint(auto);
+    const baseline = await readHeaderBaseline();
+    if (baseline === null) {
+      await writeHeaderBaseline(fingerprint); // first run — record what we found
+    } else if (baseline !== fingerprint) {
+      const drift = detectHeaderDrift(auto, baseline);
+      await notifySlack(
+        `:eyes: *The automation tab's header changed.* ${drift.summary}\n` +
+          `Sending continues — the required columns are all still present and readable. ` +
+          `If this wasn't deliberate, check the sheet: an accidental sort is what broke it on 17 July.`,
+      );
+      await writeHeaderBaseline(fingerprint); // report once, not every tick
+    }
+  } catch (e) {
+    summary.errors.push(`header baseline: ${(e as Error).message}`);
+  }
 
   // 1) INGEST — form rows we haven't seen (matched on lead id, then phone).
   // Dedupe sets are built once from the automation tab and shared across every
@@ -726,6 +780,20 @@ export async function runTick(): Promise<TickSummary> {
       if (!leadId || (!email && !phone)) continue;
       if (knownIds.has(leadId) || (phone && knownPhones.has(phoneKey(phone)))) continue;
       if (isTestLead(name, email, phone)) continue;
+      // Blast-radius ceiling. Real traffic is a few new leads per tick; a flood
+      // of "new" leads means dedupe has stopped working, which is precisely how
+      // the July incident looked from the inside.
+      if (summary.ingested >= MAX_INGEST_PER_TICK) {
+        if (!summary.capped.includes("ingest")) {
+          summary.capped.push("ingest");
+          await notifySlack(
+            `:warning: *Ingest ceiling hit* — ${MAX_INGEST_PER_TICK} new leads in one tick. ` +
+              `The rest wait for the next tick. If this repeats, dedupe is not working and the sheet needs a look.`,
+          );
+        }
+        summary.truncated = true;
+        break;
+      }
       try {
         await ingestLead(auto, {
           leadId,
@@ -789,6 +857,17 @@ export async function runTick(): Promise<TickSummary> {
       if (registered) {
         if (switches.reminders) summary.remindersSent += await remindLead(auto, row);
       } else if (switches.nurture && !quiet && dueForNurture(cell(auto, row, A.lastNudge))) {
+        if (summary.nurtured >= MAX_NURTURE_PER_TICK) {
+          if (!summary.capped.includes("nurture")) {
+            summary.capped.push("nurture");
+            await notifySlack(
+              `:warning: *Nurture ceiling hit* — ${MAX_NURTURE_PER_TICK} follow-ups in one tick. ` +
+                `The rest wait for the next tick.`,
+            );
+          }
+          summary.truncated = true;
+          break;
+        }
         await nurtureLead(auto, row);
         summary.nurtured++;
       }

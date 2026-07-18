@@ -24,7 +24,7 @@
 // an explicit FALSE stops anything. Fail-closed would mean one transient Sheets
 // blip silently kills a live campaign — a much worse failure than the switch
 // briefly not applying, and one nobody would notice until the event.
-import { readTable, resolveHeader, cell } from "./google";
+import { readTable, resolveHeader, cell, updateRow, appendRow } from "./google";
 import { env } from "./env";
 
 export interface Switches {
@@ -66,4 +66,49 @@ export async function readSwitches(): Promise<Switches> {
     reminders: on("reminders_enabled"),
     source: `'${table.tab}' (${map.size} setting(s))`,
   };
+}
+
+// ---- header baseline -------------------------------------------------------
+//
+// The known-good automation header, stored as an ordinary control-tab row so it
+// is visible and correctable by hand. Kept HERE rather than in the automation
+// tab on purpose: a baseline that lives in the file being watched is worthless,
+// because whatever damages the header damages the baseline with it.
+//
+// First run records whatever it finds — there is no way to know the "right"
+// header from cold, and refusing to run until a human types one in would just
+// mean the guard gets disabled. From then on, any change is reported once and
+// the baseline moves on, so a deliberate edit costs one Slack message rather
+// than one every five minutes.
+const BASELINE_KEY = "automation_header";
+
+export async function readHeaderBaseline(): Promise<string | null> {
+  try {
+    const table = await readTable(env.controlTab());
+    const cKey = resolveHeader(table, ["key", "setting", "name"]);
+    const cVal = resolveHeader(table, ["value", "enabled", "state"]);
+    if (!cKey || !cVal) return null;
+    for (const row of table.rows) {
+      if (cell(table, row, cKey).trim().toLowerCase() === BASELINE_KEY) {
+        return cell(table, row, cVal);
+      }
+    }
+    return null;
+  } catch {
+    return null; // no control tab — drift detection is simply unavailable
+  }
+}
+
+export async function writeHeaderBaseline(fingerprint: string): Promise<void> {
+  const table = await readTable(env.controlTab());
+  const cKey = resolveHeader(table, ["key", "setting", "name"]);
+  const cVal = resolveHeader(table, ["value", "enabled", "state"]);
+  if (!cKey || !cVal) return;
+  for (const row of table.rows) {
+    if (cell(table, row, cKey).trim().toLowerCase() === BASELINE_KEY) {
+      await updateRow(table, row.rowNumber, { [cVal]: fingerprint });
+      return;
+    }
+  }
+  await appendRow(table, { [cKey]: BASELINE_KEY, [cVal]: fingerprint });
 }
