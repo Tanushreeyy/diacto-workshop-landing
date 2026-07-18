@@ -20,7 +20,13 @@ yarn-debug.log*
 yarn-error.log*
 
 # local env files
-.env*.local
+#
+# Every .env EXCEPT .env.example is ignored. The earlier ".env*.local" pattern
+# covered .env.local but not .env.staging or .env.production, so creating either
+# of those would have committed live credentials.
+.env
+.env.*
+!.env.example
 
 # typescript
 *.tsbuildinfo
