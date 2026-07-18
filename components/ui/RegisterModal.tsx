@@ -214,7 +214,11 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
         onRegistered();
       } else if (d.error === "bad_email") setErr("Please enter a valid email address.");
       else if (d.error === "bad_phone") setErr("Please enter a valid phone number.");
-      else setErr("Something went wrong. Please try again.");
+      // Deliberately not "please try again". When this fires the failure is on
+      // our side — a renamed sheet tab, a read-only service account — and it will
+      // fail again just as fast, so inviting a retry wastes the person's time and
+      // makes it look like they did something wrong.
+      else setErr("We've updated our registration process. Our team will contact you shortly.");
     } catch {
       setErr("Network error. Please try again.");
     } finally {
