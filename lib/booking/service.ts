@@ -16,7 +16,14 @@
 
 import crypto from "crypto";
 import { env } from "./env";
-import { WORKSHOP, WA_TEMPLATES, WA_NURTURE_LADDER, OPT_OUT, OptOutReason } from "./config";
+import {
+  WORKSHOP,
+  WA_TEMPLATES,
+  WA_NURTURE_LADDER,
+  OPT_OUT,
+  OptOutReason,
+  EMAIL_ONLY_REASONS,
+} from "./config";
 import { readSwitches } from "./control";
 import { withSheetLock } from "./lock";
 import {
@@ -58,11 +65,11 @@ const A = {
   passSent: "pass_sent_at",
   remindersSent: "reminders_sent",
   expectations: "expectations",
-  // Why a reason and not a flag: see OPT_OUT in config.ts. "reply" stops the
-  // chasing but leaves a registered attendee's reminders alone; "unsubscribe"
-  // stops everything. Blank = subscribed, so clearing the cell in the sheet
-  // resubscribes them and is the manual escape hatch for email replies (which we
-  // cannot see — the Graph app is Mail.Send only).
+  // Why a reason and not a flag: see OPT_OUT in config.ts. "reply",
+  // "unsubscribe" and "duplicate" all stop both channels including reminders;
+  // "bounced" mutes email only (EMAIL_ONLY_REASONS) because a dead mailbox is not
+  // an opt-out. Blank = subscribed, so clearing the cell in the sheet
+  // resubscribes them.
   optedOut: "opted_out",
   optedOutAt: "opted_out_at",
 } as const;
@@ -496,10 +503,19 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
   );
 }
 
+// The lead's email address, or "" if it must not be written to. Every send site
+// already skips a falsy email, so returning "" is all it takes to mute the
+// channel while leaving WhatsApp untouched.
+function emailUsable(auto: Table, row: SheetRow): string {
+  const reason = cell(auto, row, A.optedOut).trim().toLowerCase();
+  if (EMAIL_ONLY_REASONS.includes(reason)) return "";
+  return cell(auto, row, A.email);
+}
+
 async function nurtureLead(auto: Table, row: SheetRow): Promise<void> {
   const name = cell(auto, row, A.name);
   const phone = cell(auto, row, A.phone);
-  const email = cell(auto, row, A.email);
+  const email = emailUsable(auto, row);
   const token = cell(auto, row, A.token);
   const ctx = ctxFor(name, token);
   const stage = parseInt(cell(auto, row, A.nurtureStage) || "0", 10) || 0;
@@ -552,7 +568,7 @@ async function remindLead(auto: Table, row: SheetRow): Promise<number> {
 
   const name = cell(auto, row, A.name) || "Guest";
   const company = cell(auto, row, A.company);
-  const email = cell(auto, row, A.email);
+  const email = emailUsable(auto, row);
   const phone = cell(auto, row, A.phone);
   const regId = cell(auto, row, A.regId);
   const token = cell(auto, row, A.token);
@@ -726,14 +742,15 @@ export async function runTick(): Promise<TickSummary> {
     if (outOfTime()) { summary.truncated = true; break; }
     if (!cell(auto, row, A.token)) continue;
 
-    // Opt-out gate — one place, both channels. ANY opt-out reason silences
+    // Opt-out gate — one place, both channels. Any opt-out reason silences
     // everything, reminders included: once someone has replied or unsubscribed we
-    // stop messaging them, full stop. The reason (reply / unsubscribe / duplicate)
-    // is kept for audit + Slack, not for different behaviour. Sits BEFORE the
-    // isDone branch so it governs reminders too.
+    // stop messaging them, full stop. The one exception is an EMAIL_ONLY_REASON
+    // ("bounced"), which means the mailbox is dead rather than the person opting
+    // out — that row carries on over WhatsApp and is filtered at the send site by
+    // emailUsable(). Sits BEFORE the isDone branch so it governs reminders too.
     const optOut = cell(auto, row, A.optedOut).trim();
     const registered = isDone(cell(auto, row, A.done));
-    if (optOut) {
+    if (optOut && !EMAIL_ONLY_REASONS.includes(optOut.toLowerCase())) {
       summary.suppressed++;
       continue;
     }
@@ -798,6 +815,23 @@ export async function setOptOut(
 
     const name = cell(auto, row, A.name) || "there";
     const current = cell(auto, row, A.optedOut).trim().toLowerCase();
+    // Never let a bounce overwrite a real opt-out. "bounced" only mutes email, so
+    // stamping it over an unsubscribe would quietly switch WhatsApp back on for
+    // someone who asked us to stop. Mail to an unsubscribed lead has already
+    // stopped, so nothing is lost by keeping the stronger reason.
+    if (
+      current &&
+      !EMAIL_ONLY_REASONS.includes(current) &&
+      EMAIL_ONLY_REASONS.includes(reason)
+    ) {
+      return {
+        ok: true,
+        found: true,
+        name,
+        reason: current as OptOutReason,
+        alreadyOut: true,
+      };
+    }
     // Never downgrade a hard unsubscribe to a soft reply: someone who opted out
     // fully and then sends another message must stay fully out.
     if (current === OPT_OUT.unsubscribe && reason === OPT_OUT.reply) {

@@ -62,8 +62,18 @@ export const OPT_OUT = {
   reply: "reply", // inbound message (recorded manually on Growth, or via webhook)
   unsubscribe: "unsubscribe", // explicit opt-out (email link or STOP word)
   duplicate: "duplicate", // a raced/duplicate row retired by reconcile
+  bounced: "bounced", // the email address is dead — see EMAIL_ONLY_REASONS
 } as const;
 export type OptOutReason = (typeof OPT_OUT)[keyof typeof OPT_OUT];
+
+// Reasons that silence EMAIL ONLY, leaving WhatsApp alone.
+//
+// A bounce is not consent to be left alone — the person never asked us to stop,
+// their mailbox simply doesn't exist. Two of the addresses that hard-bounced in
+// July are registered attendees whose phones work fine; treating "bounced" like
+// an unsubscribe would have cancelled their event-day reminders and they'd have
+// shown up to nothing. Every other reason silences both channels.
+export const EMAIL_ONLY_REASONS: readonly string[] = [OPT_OUT.bounced];
 
 // Inbound WhatsApp text that means "stop", matched case-insensitively against the
 // whole trimmed message so "stop" opts out but "please stop sending at 9am, call
