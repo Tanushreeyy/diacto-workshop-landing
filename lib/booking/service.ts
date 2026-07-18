@@ -22,7 +22,7 @@ import {
   WA_NURTURE_LADDER,
   OPT_OUT,
   OptOutReason,
-  EMAIL_ONLY_REASONS,
+  isChannelDead,
 } from "./config";
 import { readSwitches } from "./control";
 import { withSheetLock } from "./lock";
@@ -41,7 +41,7 @@ import { notifySlack } from "./slack";
 import { generatePass, generatePassBase64 } from "./pass";
 import { emailFor, waParamsFor, MsgCtx } from "./messages";
 import { dueForNurture, dueReminders, isQuietHours, nowIso } from "./schedule";
-import { phoneKey, toE164, isValidPhone } from "./phone";
+import { phoneKey, toE164, isValidPhone, phoneProblem } from "./phone";
 import { samePerson } from "./names";
 
 // ---- automation tab (ours) ----
@@ -66,13 +66,18 @@ const A = {
   passSent: "pass_sent_at",
   remindersSent: "reminders_sent",
   expectations: "expectations",
-  // Why a reason and not a flag: see OPT_OUT in config.ts. "reply",
-  // "unsubscribe" and "duplicate" all stop both channels including reminders;
-  // "bounced" mutes email only (EMAIL_ONLY_REASONS) because a dead mailbox is not
-  // an opt-out. Blank = subscribed, so clearing the cell in the sheet
-  // resubscribes them.
+  // INTENT. Any value here stops every channel, reminders included. Blank =
+  // subscribed, so clearing the cell in the sheet resubscribes them.
   optedOut: "opted_out",
   optedOutAt: "opted_out_at",
+  // CHANNEL HEALTH — can we physically reach them this way? Independent of
+  // intent and of each other: a dead mailbox mutes email while WhatsApp carries
+  // on, and vice versa. Filled in by hand (or by the bounce sweep) and cleared
+  // by hand when someone supplies a working address or number.
+  emailDead: "email_dead",
+  emailDeadAt: "email_dead_at",
+  waDead: "wa_dead",
+  waDeadAt: "wa_dead_at",
 } as const;
 
 // Columns T/U/V of the automation tab (Status / Sub Status / Remarks) belong to
@@ -434,6 +439,7 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
   const token = genToken();
   const e164 = toE164(l.phone);
   const key = phoneKey(l.phone);
+  const waProblem = e164 ? phoneProblem(e164) : "no number";
 
   // The append runs under the lock AND re-checks dedupe against a fresh read
   // inside it. The tick's outer knownIds/knownPhones sets are built from one
@@ -463,6 +469,8 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
       [A.email]: l.email,
       [A.token]: token,
       [A.nurtureStage]: "0",
+      [A.waDead]: waProblem ?? "",
+      [A.waDeadAt]: waProblem ? nowIso() : "",
       [A.lastNudge]: nowIso(),
     });
     return true;
@@ -473,7 +481,12 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
   const sent: string[] = [];
   const failed: string[] = [];
 
-  if (e164) {
+  // Validate before the first send rather than discovering it on every tick for
+  // the next ten days. A typo'd number is caught the moment the lead arrives.
+  if (waProblem) {
+    console.warn(`[ingest] ${l.leadId}: unreachable number ${e164} — ${waProblem}`);
+  }
+  if (e164 && !waProblem) {
     try {
       await sendTemplate({
         whatsappNumber: e164,
@@ -504,18 +517,26 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
   );
 }
 
-// The lead's email address, or "" if it must not be written to. Every send site
-// already skips a falsy email, so returning "" is all it takes to mute the
-// channel while leaving WhatsApp untouched.
-function emailUsable(auto: Table, row: SheetRow): string {
-  const reason = cell(auto, row, A.optedOut).trim().toLowerCase();
-  if (EMAIL_ONLY_REASONS.includes(reason)) return "";
+// A lead's address/number, or "" when that channel is marked dead. Every send
+// site already skips a falsy value, so returning "" is all it takes to mute one
+// channel and leave the other running.
+export function emailUsable(auto: Table, row: SheetRow): string {
+  if (isChannelDead(cell(auto, row, A.emailDead))) return "";
   return cell(auto, row, A.email);
+}
+
+export function phoneUsable(auto: Table, row: SheetRow): string {
+  if (isChannelDead(cell(auto, row, A.waDead))) return "";
+  const phone = cell(auto, row, A.phone);
+  // Enforced here as well as in the column, so a number that cannot possibly
+  // receive a message is never tried even if nobody has marked it by hand.
+  if (phone && phoneProblem(phone)) return "";
+  return phone;
 }
 
 async function nurtureLead(auto: Table, row: SheetRow): Promise<void> {
   const name = cell(auto, row, A.name);
-  const phone = cell(auto, row, A.phone);
+  const phone = phoneUsable(auto, row);
   const email = emailUsable(auto, row);
   const token = cell(auto, row, A.token);
   const ctx = ctxFor(name, token);
@@ -570,7 +591,7 @@ async function remindLead(auto: Table, row: SheetRow): Promise<number> {
   const name = cell(auto, row, A.name) || "Guest";
   const company = cell(auto, row, A.company);
   const email = emailUsable(auto, row);
-  const phone = cell(auto, row, A.phone);
+  const phone = phoneUsable(auto, row);
   const regId = cell(auto, row, A.regId);
   const token = cell(auto, row, A.token);
   const ctx = ctxFor(name, token, regId || undefined);
@@ -637,6 +658,7 @@ export interface TickSummary {
   nurtured: number;
   remindersSent: number;
   suppressed: number; // rows skipped because they opted out
+  unreachable: number; // rows with no working channel left (email + WhatsApp both dead)
   formRows: number;
   leads: number;
   switches: string; // which switches were in effect this tick
@@ -666,6 +688,7 @@ export async function runTick(): Promise<TickSummary> {
     nurtured: 0,
     remindersSent: 0,
     suppressed: 0,
+    unreachable: 0,
     formRows: forms.reduce((n, f) => n + (f?.rows.length ?? 0), 0),
     leads: auto.rows.length,
     switches: `ingest=${switches.ingest} nurture=${switches.nurture} reminders=${switches.reminders} [${switches.source}]`,
@@ -743,16 +766,22 @@ export async function runTick(): Promise<TickSummary> {
     if (outOfTime()) { summary.truncated = true; break; }
     if (!cell(auto, row, A.token)) continue;
 
-    // Opt-out gate — one place, both channels. Any opt-out reason silences
-    // everything, reminders included: once someone has replied or unsubscribed we
-    // stop messaging them, full stop. The one exception is an EMAIL_ONLY_REASON
-    // ("bounced"), which means the mailbox is dead rather than the person opting
-    // out — that row carries on over WhatsApp and is filtered at the send site by
-    // emailUsable(). Sits BEFORE the isDone branch so it governs reminders too.
+    // Opt-out gate — one place, every channel. ANY value in opted_out silences
+    // everything, reminders included: once someone has replied, unsubscribed or
+    // been retired as a duplicate we stop messaging them, full stop. Sits BEFORE
+    // the isDone branch so it governs reminders too.
     const optOut = cell(auto, row, A.optedOut).trim();
     const registered = isDone(cell(auto, row, A.done));
-    if (optOut && !EMAIL_ONLY_REASONS.includes(optOut.toLowerCase())) {
+    if (optOut) {
       summary.suppressed++;
+      continue;
+    }
+
+    // Channel health is a separate question from intent: this person has not
+    // asked us to stop, we simply have no working address or number left. Skip
+    // rather than walk into nurtureLead and do nothing.
+    if (!emailUsable(auto, row) && !phoneUsable(auto, row)) {
+      summary.unreachable++;
       continue;
     }
 
@@ -816,23 +845,6 @@ export async function setOptOut(
 
     const name = cell(auto, row, A.name) || "there";
     const current = cell(auto, row, A.optedOut).trim().toLowerCase();
-    // Never let a bounce overwrite a real opt-out. "bounced" only mutes email, so
-    // stamping it over an unsubscribe would quietly switch WhatsApp back on for
-    // someone who asked us to stop. Mail to an unsubscribed lead has already
-    // stopped, so nothing is lost by keeping the stronger reason.
-    if (
-      current &&
-      !EMAIL_ONLY_REASONS.includes(current) &&
-      EMAIL_ONLY_REASONS.includes(reason)
-    ) {
-      return {
-        ok: true,
-        found: true,
-        name,
-        reason: current as OptOutReason,
-        alreadyOut: true,
-      };
-    }
     // Never downgrade a hard unsubscribe to a soft reply: someone who opted out
     // fully and then sends another message must stay fully out.
     if (current === OPT_OUT.unsubscribe && reason === OPT_OUT.reply) {
@@ -882,13 +894,10 @@ export async function reconcileDuplicates(): Promise<{ retired: number; groups: 
   return withSheetLock("reconcileDuplicates", async () => {
     const auto = await readTable(env.autoTab());
 
-    // Rows still in play. An EMAIL_ONLY_REASON ("bounced") does NOT take a row
-    // out of contention: mail to it has stopped but WhatsApp has not, so it can
-    // still be half of a double-messaging pair.
-    const active = auto.rows.filter((r) => {
-      const reason = cell(auto, r, A.optedOut).trim().toLowerCase();
-      return !reason || EMAIL_ONLY_REASONS.includes(reason);
-    });
+    // Rows still in play. A dead channel does NOT take a row out of contention —
+    // it may still be messaged on the other one, so it can still be half of a
+    // double-messaging pair. Only intent (opted_out) retires a row.
+    const active = auto.rows.filter((r) => !cell(auto, r, A.optedOut).trim());
 
     // Union-find over the active rows. Both passes below contribute edges, and a
     // row can be caught by both — merging first means each cluster of duplicates

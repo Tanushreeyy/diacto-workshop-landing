@@ -58,22 +58,31 @@ export const WA_NURTURE_LADDER = [
 // Any opt-out reason stops ALL messaging (nurture AND reminders) — once a person
 // has replied or unsubscribed we go quiet, full stop. The reason is stored rather
 // than a bare TRUE only for audit and Slack context, not for different behaviour.
+// Why the person is being left alone. This column records INTENT, and any value
+// in it stops everything on every channel — nurture, follow-ups and reminders.
+//
+// Whether a channel physically works is a different question and lives in its
+// own columns (email_dead / wa_dead). Keeping the two apart matters: a bounce is
+// not consent to be left alone, and three of the addresses that hard-bounced in
+// July belong to registered attendees whose phones work fine. Filing "the
+// mailbox doesn't exist" under "they asked us to stop" would have cancelled
+// their event-day reminders and they'd have shown up to nothing.
 export const OPT_OUT = {
   reply: "reply", // inbound message (recorded manually on Growth, or via webhook)
   unsubscribe: "unsubscribe", // explicit opt-out (email link or STOP word)
   duplicate: "duplicate", // a raced/duplicate row retired by reconcile
-  bounced: "bounced", // the email address is dead — see EMAIL_ONLY_REASONS
 } as const;
 export type OptOutReason = (typeof OPT_OUT)[keyof typeof OPT_OUT];
 
-// Reasons that silence EMAIL ONLY, leaving WhatsApp alone.
-//
-// A bounce is not consent to be left alone — the person never asked us to stop,
-// their mailbox simply doesn't exist. Two of the addresses that hard-bounced in
-// July are registered attendees whose phones work fine; treating "bounced" like
-// an unsubscribe would have cancelled their event-day reminders and they'd have
-// shown up to nothing. Every other reason silences both channels.
-export const EMAIL_ONLY_REASONS: readonly string[] = [OPT_OUT.bounced];
+// A channel-health cell is "stop" unless it is blank or explicitly negative.
+// Anything a human might type to mean yes — TRUE, yes, y, 1, "bounced",
+// "invalid number" — counts as dead, because these cells are filled in by hand
+// and the safe reading of an ambiguous value is to stop using that channel.
+export function isChannelDead(v: string): boolean {
+  const t = (v || "").trim().toLowerCase();
+  if (!t) return false;
+  return !["false", "no", "off", "0", "n"].includes(t);
+}
 
 // Inbound WhatsApp text that means "stop", matched case-insensitively against the
 // whole trimmed message so "stop" opts out but "please stop sending at 9am, call
