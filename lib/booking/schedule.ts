@@ -31,25 +31,55 @@ export function isQuietHours(now: Date = new Date()): boolean {
   return h < 9 || h >= 22;
 }
 
-// Daily nurture slots (IST): 10:00 and 17:00. WA + email fire once per slot.
-const NURTURE_SLOTS = [10, 17];
+// Nurture slots (IST): 10:00 morning, 17:00 evening.
+const MORNING = 10;
+const EVENING = 17;
 
-// A pending lead is due when the day has passed a nurture slot that its last
-// nudge predates. Robust to missed ticks (catches up the same day) and never
-// exceeds two touches per day.
+// ONE nudge a day, alternating the time of day.
+//
+//   day 1  10:00   day 2  17:00   day 3  10:00   day 4  17:00 …
+//
+// It used to be both slots every day. That is twice the contact for the same
+// message, and the July audit put a number on the cost: 48 people received three
+// promotional emails in a single day, because the welcome mail landed on top of
+// two nudges. Halving the frequency also removes any chance of a lead hitting the
+// two-a-day promotional ceiling through nurture alone.
+//
+// Alternating rather than fixing one time is deliberate: someone who never reads
+// mail before lunch would otherwise never see a single message, and the whole
+// ladder would be wasted on them. Rotating gives every lead both a morning and an
+// evening attempt across any two consecutive touches.
+//
+// The slot is chosen from the LAST nudge, not from the date, so the rhythm
+// survives a paused campaign, a missed tick or a resubscribe: whatever came last,
+// the other one comes next.
+function slotOf(hour: number): typeof MORNING | typeof EVENING {
+  return hour < EVENING ? MORNING : EVENING;
+}
+
 export function dueForNurture(lastNudgeAtIso: string, now: Date = new Date()): boolean {
   const np = istParts(now);
-  const passed = NURTURE_SLOTS.filter((s) => np.hour >= s);
-  if (passed.length === 0) return false; // before the first slot (10:00)
-  const currentSlot = Math.max(...passed); // 10 or 17
-  if (!lastNudgeAtIso) return true;
-  const lastMs = Date.parse(lastNudgeAtIso);
-  if (Number.isNaN(lastMs)) return true;
+
+  // Never before the morning slot opens.
+  if (np.hour < MORNING) return false;
+
+  const lastMs = Date.parse(lastNudgeAtIso || "");
+  // Never nudged: take whichever slot has opened today. A lead who arrives in the
+  // afternoon should not wait until tomorrow morning for their first follow-up.
+  if (!lastNudgeAtIso || Number.isNaN(lastMs)) return true;
+
   const lp = istParts(new Date(lastMs));
-  const sameDay =
-    lp.year === np.year && lp.month === np.month && lp.date === np.date;
-  if (!sameDay) return true; // last nudge on a prior day → due
-  return lp.hour < currentSlot; // due if the last nudge predates this slot
+
+  // At most one a day, whatever else is true.
+  if (lp.year === np.year && lp.month === np.month && lp.date === np.date) {
+    return false;
+  }
+
+  // Alternate: morning last time means evening this time, and vice versa. The
+  // check is `>=` so a slot that was missed entirely (an outage, a tick that
+  // never ran) still goes out later the same day rather than being skipped.
+  const wanted = slotOf(lp.hour) === MORNING ? EVENING : MORNING;
+  return np.hour >= wanted;
 }
 
 // How long after its slot a reminder may still go out. Past this it is stale and
