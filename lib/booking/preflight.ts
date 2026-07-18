@@ -39,10 +39,8 @@ const REQUIRED = [
   "confirm_token",
   "registration_complete",
   "nurture_stage",
-  "opted_out",
-  "opted_out_at",
-  "email_dead",
-  "wa_dead",
+  "status",
+  "status_at",
 ] as const;
 
 export interface Preflight {
@@ -62,7 +60,7 @@ export function checkAutomationTable(auto: Table): Preflight {
   }
 
   // Duplicates are worse than missing, because nothing looks wrong: readTable's
-  // index keeps the LAST occurrence, so a stray second "opted_out" column would
+  // index keeps the LAST occurrence, so a stray second "status" column would
   // silently become the one we read, and every suppression check would consult an
   // empty column.
   const seen = new Map<string, number>();
