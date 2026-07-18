@@ -93,6 +93,20 @@ export const STATUS = {
 } as const;
 export type LeadStatus = (typeof STATUS)[keyof typeof STATUS];
 
+// Where a status came from. Kept because "why is this person stopped?" is the
+// first question anyone asks of the sheet, and without it the answer is a
+// guess — the value alone cannot distinguish a caller's judgement from the
+// person's own words, and those carry very different weight.
+export const STATUS_SOURCE = {
+  caller: "caller", // synced from the Calling Sheet
+  reply: "reply", // they wrote back
+  unsubscribe_link: "unsubscribe_link", // they clicked it
+  bounce: "bounce", // their mailbox rejected us
+  validation: "validation", // the number cannot receive WhatsApp
+  reconcile: "reconcile", // retired as a duplicate row
+} as const;
+export type StatusSource = (typeof STATUS_SOURCE)[keyof typeof STATUS_SOURCE];
+
 export interface Policy {
   email: boolean; // may we send email?
   wa: boolean; // may we send WhatsApp?

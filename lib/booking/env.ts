@@ -54,6 +54,9 @@ export const env = {
   // TAB still means "everything enabled" (control.ts fails open by design); a
   // missing VARIABLE is a misconfiguration and is refused here.
   controlTab: () => req("SHEET_CONTROL_TAB"),
+  // The calling team's own tab, read-only. Optional: an environment without one
+  // (staging) simply skips the sync rather than failing.
+  callingTab: () => opt("SHEET_CALLING_TAB", ""),
 
   // WhatsApp (WATI)
   watiEndpoint: () => req("WATI_API_ENDPOINT").replace(/\/+$/, ""),

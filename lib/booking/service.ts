@@ -22,6 +22,8 @@ import {
   WA_NURTURE_LADDER,
   STATUS,
   LeadStatus,
+  STATUS_SOURCE,
+  StatusSource,
   policyFor,
   outranks,
 } from "./config";
@@ -55,6 +57,7 @@ import { dueForNurture, dueReminders, isQuietHours, nowIso } from "./schedule";
 import { phoneKey, toE164, isValidPhone, phoneProblem } from "./phone";
 import { samePerson } from "./names";
 import { pollMailReplies } from "./mailReplies";
+import { syncCallingDispositions } from "./callingSync";
 
 // ---- automation tab (ours) ----
 const A = {
@@ -83,6 +86,7 @@ const A = {
   // clearing the cell puts someone back in the campaign.
   status: "status",
   statusAt: "status_at",
+  statusSource: "status_source",
   // Promotional touches sent to this person today, and the IST day they belong
   // to. Read together: a stale day means the count is zero, so nothing needs
   // resetting at midnight.
@@ -485,6 +489,7 @@ async function ingestLead(
       [A.nurtureStage]: "0",
       [A.status]: waProblem ? STATUS.invalid_number : "",
       [A.statusAt]: waProblem ? nowIso() : "",
+      [A.statusSource]: waProblem ? STATUS_SOURCE.validation : "",
       [A.promoToday]: "1", // the WA-1/EM-1 touch below
       [A.promoDay]: istDay(),
       [A.lastNudge]: nowIso(),
@@ -780,6 +785,7 @@ export interface TickSummary {
   halted: boolean; // preflight refused to run — the sheet looks damaged
   throttled: number; // rows held back by the per-person daily promo limit
   repliesStopped: number; // leads opted out this tick because they replied by email
+  callerStops: number; // leads stopped this tick by a calling-team disposition
   truncated: boolean; // hit the time budget — the next tick picks up the rest
   errors: string[];
 }
@@ -813,6 +819,7 @@ export async function runTick(): Promise<TickSummary> {
     halted: false,
     throttled: 0,
     repliesStopped: 0,
+    callerStops: 0,
     truncated: false,
     errors: [],
   };
@@ -928,6 +935,23 @@ export async function runTick(): Promise<TickSummary> {
     summary.errors.push(`reconcile: ${(e as Error).message}`);
   }
 
+  // 1b2) CALLER DISPOSITIONS — what the humans on the phone learned. Runs before
+  // nurture so a "Not Interested" recorded this morning stops today's follow-up
+  // rather than one tick too late. Never allowed to sink the tick.
+  try {
+    if (env.callingTab()) {
+      const sync = await syncCallingDispositions();
+      summary.callerStops = sync.applied;
+      if (sync.applied) {
+        await notifySlack(
+          `:telephone_receiver: Applied *${sync.applied}* disposition(s) from the calling sheet — those leads will no longer be chased.`,
+        );
+      }
+    }
+  } catch (e) {
+    summary.errors.push(`calling sync: ${(e as Error).message}`);
+  }
+
   // 1c) REPLIES — anyone who has answered by email stops being chased. Runs
   // BEFORE nurture so a reply that arrived since the last tick takes effect on
   // this one, rather than one nudge too late. Never allowed to sink the tick:
@@ -1025,6 +1049,7 @@ export interface OptOutResult {
 export async function setOptOut(
   match: { token?: string; phoneKey?: string; email?: string },
   reason: LeadStatus,
+  source: StatusSource = STATUS_SOURCE.reply,
 ): Promise<OptOutResult> {
   return withSheetLock("setOptOut", async () => {
     const auto = await readTable(env.autoTab());
@@ -1055,6 +1080,7 @@ export async function setOptOut(
     await updateRow(auto, row.rowNumber, {
       [A.status]: reason,
       [A.statusAt]: nowIso(),
+      [A.statusSource]: source,
     });
     return { ok: true, found: true, name, reason };
   });
@@ -1070,7 +1096,11 @@ export async function clearOptOut(token: string): Promise<OptOutResult> {
     if (!row) return { ok: true, found: false };
     const name = cell(auto, row, A.name) || "there";
     if (!cell(auto, row, A.status)) return { ok: true, found: true, name }; // already subscribed
-    await updateRow(auto, row.rowNumber, { [A.status]: "", [A.statusAt]: "" });
+    await updateRow(auto, row.rowNumber, {
+      [A.status]: "",
+      [A.statusAt]: "",
+      [A.statusSource]: "",
+    });
     return { ok: true, found: true, name };
   });
 }
@@ -1177,6 +1207,7 @@ export async function reconcileDuplicates(): Promise<{ retired: number; groups: 
         await updateRow(auto, r.rowNumber, {
           [A.status]: STATUS.duplicate,
           [A.statusAt]: nowIso(),
+          [A.statusSource]: STATUS_SOURCE.reconcile,
         });
         retired++;
       }
