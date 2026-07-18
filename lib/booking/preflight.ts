@@ -148,19 +148,19 @@ export function detectHeaderDrift(auto: Table, baseline: string): HeaderDrift {
   };
 }
 
-// ---- blast-radius limits ---------------------------------------------------
+// ---- how often one person may be chased --------------------------------
 //
-// Not business rules — ceilings. No single tick should be able to message a
-// large fraction of the list, whatever goes wrong upstream. Sized against real
-// traffic: a handful of new leads per tick, and a nurture ladder that touches
-// each person twice a day. Above these it isn't a busy day, it's a malfunction —
-// so stop, leave the rest for the next tick, and alert. A genuine burst of leads
-// is merely delayed five minutes.
+// The limit that matters is per PERSON per DAY, not per tick. A per-tick ceiling
+// only bounds the system's throughput — at 15 a tick it still permits 180 emails
+// an hour, and says nothing about whether they all went to the same person.
 //
-// Reminders are deliberately NOT capped. They are bounded by reminders_sent in
-// the sheet, they only fire in a window before the event, and on event morning
-// they legitimately go to every registered attendee at once. Capping them could
-// leave an attendee with no reminder — and they are already covered by the
-// preflight above, which is what would have stopped the July incident outright.
-export const MAX_INGEST_PER_TICK = 15;
-export const MAX_NURTURE_PER_TICK = 30;
+// Two promotional touches a day, which is what the nurture ladder already
+// intends (10:00 and 17:00 IST). This is the backstop for when something else
+// has gone wrong, not the schedule.
+//
+// TRANSACTIONAL messages are exempt and deliberately so: a registration
+// confirmation, an Event Pass, a day-of reminder are all messages the person
+// asked for by registering, and withholding one to stay under a marketing quota
+// would be the wrong failure. So a confirmation on a day that already had two
+// nudges is fine — three messages, only two of them promotional.
+export const MAX_PROMO_PER_DAY = 2;

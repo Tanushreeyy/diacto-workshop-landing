@@ -33,8 +33,7 @@ import {
   checkAutomationTable,
   headerFingerprint,
   detectHeaderDrift,
-  MAX_INGEST_PER_TICK,
-  MAX_NURTURE_PER_TICK,
+  MAX_PROMO_PER_DAY,
 } from "./preflight";
 import { withSheetLock } from "./lock";
 import {
@@ -89,6 +88,11 @@ const A = {
   emailDeadAt: "email_dead_at",
   waDead: "wa_dead",
   waDeadAt: "wa_dead_at",
+  // Promotional touches sent to this person today, and the IST day they belong
+  // to. Read together: a stale day means the count is zero, so nothing needs
+  // resetting at midnight.
+  promoToday: "promo_today",
+  promoDay: "promo_day",
 } as const;
 
 // Columns T/U/V of the automation tab (Status / Sub Status / Remarks) belong to
@@ -446,7 +450,11 @@ interface FormLead {
   location: string;
 }
 
-async function ingestLead(auto: Table, l: FormLead): Promise<void> {
+async function ingestLead(
+  auto: Table,
+  l: FormLead,
+  ledger: PromoLedger,
+): Promise<void> {
   const token = genToken();
   const e164 = toE164(l.phone);
   const key = phoneKey(l.phone);
@@ -482,6 +490,8 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
       [A.nurtureStage]: "0",
       [A.waDead]: waProblem ?? "",
       [A.waDeadAt]: waProblem ? nowIso() : "",
+      [A.promoToday]: "1", // the WA-1/EM-1 touch below
+      [A.promoDay]: istDay(),
       [A.lastNudge]: nowIso(),
     });
     return true;
@@ -491,6 +501,25 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
   const ctx = ctxFor(l.name, token);
   const sent: string[] = [];
   const failed: string[] = [];
+
+  // Same daily ceiling as nurture. A brand-new row normally has no history, so
+  // this only bites when the person already exists under another row — which is
+  // precisely the state a broken dedupe produces, and the state that sent one
+  // man the same email 35 times.
+  if (!promoAllowedForLead(ledger, l.email, l.phone)) {
+    console.warn(`[ingest] ${l.leadId}: daily promo limit reached for this person — no WA-1/EM-1`);
+    await notifySlack(
+      `:no_bell: Skipped the welcome message for *${l.name || l.leadId}* — they have already had ` +
+        `${MAX_PROMO_PER_DAY} promotional message(s) today. Their row was still created.`,
+    );
+    return;
+  }
+  for (const k of [
+    l.email ? `e:${l.email.trim().toLowerCase()}` : "",
+    phoneKey(l.phone || "") ? `p:${phoneKey(l.phone)}` : "",
+  ].filter(Boolean)) {
+    ledger.set(k, (ledger.get(k) ?? 0) + 1);
+  }
 
   // Validate before the first send rather than discovering it on every tick for
   // the next ten days. A typo'd number is caught the moment the lead arrives.
@@ -528,6 +557,81 @@ async function ingestLead(auto: Table, l: FormLead): Promise<void> {
   );
 }
 
+
+// ---- promotional send budget ----------------------------------------------
+//
+// How many chasing messages one PERSON has already had today. Keyed by email and
+// phone rather than by row, because the same human can hold more than one row —
+// that is exactly what happened in July, and a per-row counter would have handed
+// each duplicate its own fresh allowance.
+
+/** IST calendar day. The nurture windows are IST, so the day must roll at IST midnight. */
+export function istDay(now: Date = new Date()): string {
+  return new Date(now.getTime() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+}
+
+function recipientKeys(auto: Table, row: SheetRow): string[] {
+  const keys: string[] = [];
+  const em = cell(auto, row, A.email).trim().toLowerCase();
+  if (em) keys.push(`e:${em}`);
+  const pk = cell(auto, row, A.phoneKey).trim();
+  if (pk) keys.push(`p:${pk}`);
+  return keys;
+}
+
+export type PromoLedger = Map<string, number>;
+
+export function buildPromoLedger(auto: Table, day = istDay()): PromoLedger {
+  const ledger: PromoLedger = new Map();
+  for (const row of auto.rows) {
+    if (cell(auto, row, A.promoDay).trim() !== day) continue; // stale day = zero
+    const n = parseInt(cell(auto, row, A.promoToday) || "0", 10) || 0;
+    if (n <= 0) continue;
+    // A person's tally is the highest count on any of their rows, not the sum:
+    // two rows for one person each recording their own touches would otherwise
+    // double-count a single send.
+    for (const k of recipientKeys(auto, row)) {
+      ledger.set(k, Math.max(ledger.get(k) ?? 0, n));
+    }
+  }
+  return ledger;
+}
+
+function promoSentToday(ledger: PromoLedger, auto: Table, row: SheetRow): number {
+  return Math.max(0, ...recipientKeys(auto, row).map((k) => ledger.get(k) ?? 0));
+}
+
+/** May we send this person another promotional message today? */
+export function promoAllowed(ledger: PromoLedger, auto: Table, row: SheetRow): boolean {
+  return promoSentToday(ledger, auto, row) < MAX_PROMO_PER_DAY;
+}
+
+/** As promoAllowed, for a lead that has no row yet (the first ingest touch). */
+export function promoAllowedForLead(
+  ledger: PromoLedger,
+  email: string,
+  phone: string,
+): boolean {
+  const keys: string[] = [];
+  const em = (email || "").trim().toLowerCase();
+  if (em) keys.push(`e:${em}`);
+  const pk = phoneKey(phone || "");
+  if (pk) keys.push(`p:${pk}`);
+  const sent = Math.max(0, ...keys.map((k) => ledger.get(k) ?? 0));
+  return sent < MAX_PROMO_PER_DAY;
+}
+
+/** Record one promotional touch, in the ledger and on the row. */
+async function recordPromo(ledger: PromoLedger, auto: Table, row: SheetRow): Promise<void> {
+  const day = istDay();
+  const next = promoSentToday(ledger, auto, row) + 1;
+  for (const k of recipientKeys(auto, row)) ledger.set(k, next);
+  await updateRow(auto, row.rowNumber, {
+    [A.promoToday]: String(next),
+    [A.promoDay]: day,
+  });
+}
+
 // A lead's address/number, or "" when that channel is marked dead. Every send
 // site already skips a falsy value, so returning "" is all it takes to mute one
 // channel and leave the other running.
@@ -545,7 +649,11 @@ export function phoneUsable(auto: Table, row: SheetRow): string {
   return phone;
 }
 
-async function nurtureLead(auto: Table, row: SheetRow): Promise<void> {
+async function nurtureLead(
+  auto: Table,
+  row: SheetRow,
+  ledger: PromoLedger,
+): Promise<void> {
   const name = cell(auto, row, A.name);
   const phone = phoneUsable(auto, row);
   const email = emailUsable(auto, row);
@@ -586,6 +694,7 @@ async function nurtureLead(auto: Table, row: SheetRow): Promise<void> {
     [A.nurtureStage]: String(stage + 1),
     [A.lastNudge]: nowIso(),
   });
+  if (sent.length) await recordPromo(ledger, auto, row);
 
   await notifySlack(
     `:bell: *Nudge* (touch ${stage + 1}) — ${name || "Unknown"}` +
@@ -674,7 +783,7 @@ export interface TickSummary {
   leads: number;
   switches: string; // which switches were in effect this tick
   halted: boolean; // preflight refused to run — the sheet looks damaged
-  capped: string[]; // limits that bit this tick (blast-radius ceilings)
+  throttled: number; // rows held back by the per-person daily promo limit
   truncated: boolean; // hit the time budget — the next tick picks up the rest
   errors: string[];
 }
@@ -706,7 +815,7 @@ export async function runTick(): Promise<TickSummary> {
     leads: auto.rows.length,
     switches: `ingest=${switches.ingest} nurture=${switches.nurture} reminders=${switches.reminders} [${switches.source}]`,
     halted: false,
-    capped: [],
+    throttled: 0,
     truncated: false,
     errors: [],
   };
@@ -750,6 +859,10 @@ export async function runTick(): Promise<TickSummary> {
     summary.errors.push(`header baseline: ${(e as Error).message}`);
   }
 
+  // How much chasing each person has already had today. Built once from the same
+  // snapshot the rest of the tick uses, then kept current in memory as we send.
+  const ledger = buildPromoLedger(auto);
+
   // 1) INGEST — form rows we haven't seen (matched on lead id, then phone).
   // Dedupe sets are built once from the automation tab and shared across every
   // form tab, so the same person submitting both forms is ingested exactly once.
@@ -780,31 +893,21 @@ export async function runTick(): Promise<TickSummary> {
       if (!leadId || (!email && !phone)) continue;
       if (knownIds.has(leadId) || (phone && knownPhones.has(phoneKey(phone)))) continue;
       if (isTestLead(name, email, phone)) continue;
-      // Blast-radius ceiling. Real traffic is a few new leads per tick; a flood
-      // of "new" leads means dedupe has stopped working, which is precisely how
-      // the July incident looked from the inside.
-      if (summary.ingested >= MAX_INGEST_PER_TICK) {
-        if (!summary.capped.includes("ingest")) {
-          summary.capped.push("ingest");
-          await notifySlack(
-            `:warning: *Ingest ceiling hit* — ${MAX_INGEST_PER_TICK} new leads in one tick. ` +
-              `The rest wait for the next tick. If this repeats, dedupe is not working and the sheet needs a look.`,
-          );
-        }
-        summary.truncated = true;
-        break;
-      }
       try {
-        await ingestLead(auto, {
-          leadId,
-          name,
-          email,
-          phone,
-          designation: get(fr, cDesig),
-          company: get(fr, cCompany),
-          employeeCount: get(fr, cEmp),
-          location: get(fr, cLoc),
-        });
+        await ingestLead(
+          auto,
+          {
+            leadId,
+            name,
+            email,
+            phone,
+            designation: get(fr, cDesig),
+            company: get(fr, cCompany),
+            employeeCount: get(fr, cEmp),
+            location: get(fr, cLoc),
+          },
+          ledger,
+        );
         knownIds.add(leadId);
         if (phone) knownPhones.add(phoneKey(phone));
         summary.ingested++;
@@ -857,18 +960,14 @@ export async function runTick(): Promise<TickSummary> {
       if (registered) {
         if (switches.reminders) summary.remindersSent += await remindLead(auto, row);
       } else if (switches.nurture && !quiet && dueForNurture(cell(auto, row, A.lastNudge))) {
-        if (summary.nurtured >= MAX_NURTURE_PER_TICK) {
-          if (!summary.capped.includes("nurture")) {
-            summary.capped.push("nurture");
-            await notifySlack(
-              `:warning: *Nurture ceiling hit* — ${MAX_NURTURE_PER_TICK} follow-ups in one tick. ` +
-                `The rest wait for the next tick.`,
-            );
-          }
-          summary.truncated = true;
-          break;
+        // Hard ceiling on chasing, independent of whatever the schedule thinks.
+        // If this ever bites, the schedule and the state disagree — which is the
+        // shape every resend incident has taken.
+        if (!promoAllowed(ledger, auto, row)) {
+          summary.throttled++;
+          continue;
         }
-        await nurtureLead(auto, row);
+        await nurtureLead(auto, row, ledger);
         summary.nurtured++;
       }
     } catch (e) {
