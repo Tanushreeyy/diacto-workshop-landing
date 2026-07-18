@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/booking/env";
 import { setOptOut } from "@/lib/booking/service";
-import { classifyInbound, OPT_OUT } from "@/lib/booking/config";
+import { classifyInbound, STATUS } from "@/lib/booking/config";
 import { phoneKey } from "@/lib/booking/phone";
 import { notifySlack } from "@/lib/booking/slack";
 
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   }
 
   // STOP word -> full unsubscribe; anything else a human said -> stop nurture.
-  const reason = body.type === "text" ? classifyInbound(body.text || "") : OPT_OUT.reply;
+  const reason = body.type === "text" ? classifyInbound(body.text || "") : STATUS.replied;
   const key = phoneKey(waId);
 
   let result;
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, matched: false });
   }
 
-  if (reason === OPT_OUT.unsubscribe) {
+  if (reason === STATUS.unsubscribed) {
     await notifySlack(
       `:no_bell: *${who}* sent a STOP word on WhatsApp — *unsubscribed, all messages stopped*. Message: "${preview}"`,
     ).catch(() => {});

@@ -20,9 +20,10 @@ import {
   WORKSHOP,
   WA_TEMPLATES,
   WA_NURTURE_LADDER,
-  OPT_OUT,
-  OptOutReason,
-  isChannelDead,
+  STATUS,
+  LeadStatus,
+  policyFor,
+  outranks,
 } from "./config";
 import {
   readSwitches,
@@ -77,18 +78,11 @@ const A = {
   passSent: "pass_sent_at",
   remindersSent: "reminders_sent",
   expectations: "expectations",
-  // INTENT. Any value here stops every channel, reminders included. Blank =
-  // subscribed, so clearing the cell in the sheet resubscribes them.
-  optedOut: "opted_out",
-  optedOutAt: "opted_out_at",
-  // CHANNEL HEALTH — can we physically reach them this way? Independent of
-  // intent and of each other: a dead mailbox mutes email while WhatsApp carries
-  // on, and vice versa. Filled in by hand (or by the bounce sweep) and cleared
-  // by hand when someone supplies a working address or number.
-  emailDead: "email_dead",
-  emailDeadAt: "email_dead_at",
-  waDead: "wa_dead",
-  waDeadAt: "wa_dead_at",
+  // ONE status column, shared vocabulary with the calling team's sheet. See
+  // STATUS/POLICY in config.ts for what each value permits. Blank = active, so
+  // clearing the cell puts someone back in the campaign.
+  status: "status",
+  statusAt: "status_at",
   // Promotional touches sent to this person today, and the IST day they belong
   // to. Read together: a stale day means the count is zero, so nothing needs
   // resetting at midnight.
@@ -489,8 +483,8 @@ async function ingestLead(
       [A.email]: l.email,
       [A.token]: token,
       [A.nurtureStage]: "0",
-      [A.waDead]: waProblem ?? "",
-      [A.waDeadAt]: waProblem ? nowIso() : "",
+      [A.status]: waProblem ? STATUS.invalid_number : "",
+      [A.statusAt]: waProblem ? nowIso() : "",
       [A.promoToday]: "1", // the WA-1/EM-1 touch below
       [A.promoDay]: istDay(),
       [A.lastNudge]: nowIso(),
@@ -637,12 +631,12 @@ async function recordPromo(ledger: PromoLedger, auto: Table, row: SheetRow): Pro
 // site already skips a falsy value, so returning "" is all it takes to mute one
 // channel and leave the other running.
 export function emailUsable(auto: Table, row: SheetRow): string {
-  if (isChannelDead(cell(auto, row, A.emailDead))) return "";
+  if (!policyFor(cell(auto, row, A.status)).email) return "";
   return cell(auto, row, A.email);
 }
 
 export function phoneUsable(auto: Table, row: SheetRow): string {
-  if (isChannelDead(cell(auto, row, A.waDead))) return "";
+  if (!policyFor(cell(auto, row, A.status)).wa) return "";
   const phone = cell(auto, row, A.phone);
   // Enforced here as well as in the column, so a number that cannot possibly
   // receive a message is never tried even if nobody has marked it by hand.
@@ -959,9 +953,11 @@ export async function runTick(): Promise<TickSummary> {
     // everything, reminders included: once someone has replied, unsubscribed or
     // been retired as a duplicate we stop messaging them, full stop. Sits BEFORE
     // the isDone branch so it governs reminders too.
-    const optOut = cell(auto, row, A.optedOut).trim();
+    const pol = policyFor(cell(auto, row, A.status));
     const registered = isDone(cell(auto, row, A.done));
-    if (optOut) {
+    // Reminders and chasing are governed separately, so a registered attendee
+    // whose mailbox bounced still gets reminded — over WhatsApp — on the day.
+    if (registered ? !pol.reminders : !pol.nurture) {
       summary.suppressed++;
       continue;
     }
@@ -1019,7 +1015,7 @@ export interface OptOutResult {
   ok: boolean;
   found: boolean;
   name?: string;
-  reason?: OptOutReason;
+  reason?: LeadStatus;
   alreadyOut?: boolean;
 }
 
@@ -1028,7 +1024,7 @@ export interface OptOutResult {
 // lead is a no-op that still reports success.
 export async function setOptOut(
   match: { token?: string; phoneKey?: string; email?: string },
-  reason: OptOutReason,
+  reason: LeadStatus,
 ): Promise<OptOutResult> {
   return withSheetLock("setOptOut", async () => {
     const auto = await readTable(env.autoTab());
@@ -1047,17 +1043,18 @@ export async function setOptOut(
     if (!row) return { ok: true, found: false };
 
     const name = cell(auto, row, A.name) || "there";
-    const current = cell(auto, row, A.optedOut).trim().toLowerCase();
+    const current = cell(auto, row, A.status).trim();
     // Never downgrade a hard unsubscribe to a soft reply: someone who opted out
     // fully and then sends another message must stay fully out.
-    if (current === OPT_OUT.unsubscribe && reason === OPT_OUT.reply) {
-      return { ok: true, found: true, name, reason: OPT_OUT.unsubscribe, alreadyOut: true };
+    // Never soften an existing stop — see RANK in config.ts.
+    if (!outranks(reason, current)) {
+      return { ok: true, found: true, name, reason: reason, alreadyOut: true };
     }
     if (current === reason) return { ok: true, found: true, name, reason, alreadyOut: true };
 
     await updateRow(auto, row.rowNumber, {
-      [A.optedOut]: reason,
-      [A.optedOutAt]: nowIso(),
+      [A.status]: reason,
+      [A.statusAt]: nowIso(),
     });
     return { ok: true, found: true, name, reason };
   });
@@ -1072,8 +1069,8 @@ export async function clearOptOut(token: string): Promise<OptOutResult> {
     const row = auto.rows.find((r) => cell(auto, r, A.token) === token);
     if (!row) return { ok: true, found: false };
     const name = cell(auto, row, A.name) || "there";
-    if (!cell(auto, row, A.optedOut)) return { ok: true, found: true, name }; // already subscribed
-    await updateRow(auto, row.rowNumber, { [A.optedOut]: "", [A.optedOutAt]: "" });
+    if (!cell(auto, row, A.status)) return { ok: true, found: true, name }; // already subscribed
+    await updateRow(auto, row.rowNumber, { [A.status]: "", [A.statusAt]: "" });
     return { ok: true, found: true, name };
   });
 }
@@ -1081,11 +1078,11 @@ export async function clearOptOut(token: string): Promise<OptOutResult> {
 export function optOutStateForToken(auto: Table, token: string): {
   found: boolean;
   name?: string;
-  optedOut?: string;
+  status?: string;
 } {
   const row = auto.rows.find((r) => cell(auto, r, A.token) === token);
   if (!row) return { found: false };
-  return { found: true, name: cell(auto, row, A.name) || "there", optedOut: cell(auto, row, A.optedOut) };
+  return { found: true, name: cell(auto, row, A.name) || "there", status: cell(auto, row, A.status) };
 }
 
 // Retire rows that are the same person as another row, keyed on phone number.
@@ -1100,7 +1097,13 @@ export async function reconcileDuplicates(): Promise<{ retired: number; groups: 
     // Rows still in play. A dead channel does NOT take a row out of contention —
     // it may still be messaged on the other one, so it can still be half of a
     // double-messaging pair. Only intent (opted_out) retires a row.
-    const active = auto.rows.filter((r) => !cell(auto, r, A.optedOut).trim());
+    // A row with a dead channel is still in play — it may be messaged on the
+    // other one, so it can still be half of a double-messaging pair. Only a full
+    // stop takes a row out of contention.
+    const active = auto.rows.filter((r) => {
+      const p = policyFor(cell(auto, r, A.status));
+      return p.nurture || p.reminders;
+    });
 
     // Union-find over the active rows. Both passes below contribute edges, and a
     // row can be caught by both — merging first means each cluster of duplicates
@@ -1172,8 +1175,8 @@ export async function reconcileDuplicates(): Promise<{ retired: number; groups: 
         if (r === keeper) continue;
         if (isDone(cell(auto, r, A.done))) continue; // never retire a registered row
         await updateRow(auto, r.rowNumber, {
-          [A.optedOut]: OPT_OUT.duplicate,
-          [A.optedOutAt]: nowIso(),
+          [A.status]: STATUS.duplicate,
+          [A.statusAt]: nowIso(),
         });
         retired++;
       }

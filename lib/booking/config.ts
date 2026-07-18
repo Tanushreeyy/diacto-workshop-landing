@@ -67,21 +67,119 @@ export const WA_NURTURE_LADDER = [
 // July belong to registered attendees whose phones work fine. Filing "the
 // mailbox doesn't exist" under "they asked us to stop" would have cancelled
 // their event-day reminders and they'd have shown up to nothing.
-export const OPT_OUT = {
-  reply: "reply", // inbound message (recorded manually on Growth, or via webhook)
-  unsubscribe: "unsubscribe", // explicit opt-out (email link or STOP word)
-  duplicate: "duplicate", // a raced/duplicate row retired by reconcile
+// ─── Lead status: one column, one vocabulary ───────────────────────────────
+//
+// Replaces opted_out / email_dead / wa_dead and their three timestamps. Those
+// encoded the same idea three times, and the calling team had a fourth spelling
+// of it in their own sheet, so the same person could be "Junk" to a caller and
+// still queued for follow-ups by the automation. One column, shared with the
+// callers, is the point.
+//
+// The honest cost of collapsing them: a row can now hold only ONE fact. Someone
+// who replied AND whose mailbox bounces records the stronger of the two. That is
+// acceptable because the weaker fact stops mattering once the stronger applies —
+// we are not going to email a dead address of someone who told us to stop — but
+// it is a real loss of detail, not a free simplification.
+export const STATUS = {
+  registered: "registered", // manual "they're in" — reminders yes, chasing no
+  replied: "replied", // answered us on any channel
+  unsubscribed: "unsubscribed", // asked to be removed
+  not_interested: "not_interested", // caller established they don't want it
+  junk: "junk", // caller marked the lead worthless
+  duplicate: "duplicate", // same person as another row
+  email_bounced: "email_bounced", // mailbox does not exist
+  invalid_number: "invalid_number", // number cannot receive WhatsApp
+  unreachable: "unreachable", // neither channel works
 } as const;
-export type OptOutReason = (typeof OPT_OUT)[keyof typeof OPT_OUT];
+export type LeadStatus = (typeof STATUS)[keyof typeof STATUS];
 
-// A channel-health cell is "stop" unless it is blank or explicitly negative.
-// Anything a human might type to mean yes — TRUE, yes, y, 1, "bounced",
-// "invalid number" — counts as dead, because these cells are filled in by hand
-// and the safe reading of an ambiguous value is to stop using that channel.
-export function isChannelDead(v: string): boolean {
-  const t = (v || "").trim().toLowerCase();
-  if (!t) return false;
-  return !["false", "no", "off", "0", "n"].includes(t);
+export interface Policy {
+  email: boolean; // may we send email?
+  wa: boolean; // may we send WhatsApp?
+  nurture: boolean; // may we chase them?
+  reminders: boolean; // may we send event-day reminders?
+}
+
+const ACTIVE: Policy = { email: true, wa: true, nurture: true, reminders: true };
+const SILENT: Policy = { email: false, wa: false, nurture: false, reminders: false };
+
+// What each status permits. Reminders are treated as separable from chasing on
+// purpose: a registered attendee whose mailbox bounces must still be reminded on
+// the day, over WhatsApp, or they turn up to nothing.
+const POLICY: Record<LeadStatus, Policy> = {
+  [STATUS.registered]: { email: true, wa: true, nurture: false, reminders: true },
+  [STATUS.replied]: SILENT,
+  [STATUS.unsubscribed]: SILENT,
+  [STATUS.not_interested]: SILENT,
+  [STATUS.junk]: SILENT,
+  [STATUS.duplicate]: SILENT,
+  [STATUS.unreachable]: SILENT,
+  [STATUS.email_bounced]: { email: false, wa: true, nurture: true, reminders: true },
+  [STATUS.invalid_number]: { email: true, wa: false, nurture: true, reminders: true },
+};
+
+// Which status wins when two are in play. Consent outranks deliverability: a
+// bounce must never overwrite an unsubscribe, or clearing the bounce later would
+// quietly switch that person's WhatsApp back on.
+const RANK: Record<LeadStatus, number> = {
+  [STATUS.unsubscribed]: 6,
+  [STATUS.not_interested]: 5,
+  [STATUS.junk]: 5,
+  [STATUS.replied]: 4,
+  [STATUS.duplicate]: 4,
+  [STATUS.unreachable]: 3,
+  [STATUS.email_bounced]: 2,
+  [STATUS.invalid_number]: 2,
+  [STATUS.registered]: 1,
+};
+
+// The calling team types their own spellings, and humans type variants. Map
+// everything onto the canonical vocabulary; anything unrecognised but non-empty
+// is treated as a full stop, because an unknown marking a human deliberately
+// wrote is far more likely to mean "leave them alone" than "carry on".
+const ALIASES: Record<string, LeadStatus> = {
+  "junk": STATUS.junk,
+  "not interested": STATUS.not_interested,
+  "notinterested": STATUS.not_interested,
+  "registered": STATUS.registered,
+  "invalid/ not reachable number": STATUS.invalid_number,
+  "invalid/not reachable number": STATUS.invalid_number,
+  "invalid number": STATUS.invalid_number,
+  "not reachable": STATUS.invalid_number,
+  "wrong number": STATUS.invalid_number,
+  "bounced": STATUS.email_bounced,
+  "email bounced": STATUS.email_bounced,
+  "unsubscribe": STATUS.unsubscribed,
+  "unsubscribed": STATUS.unsubscribed,
+  "reply": STATUS.replied,
+  "replied": STATUS.replied,
+  "duplicate": STATUS.duplicate,
+  "unreachable": STATUS.unreachable,
+};
+
+/** Canonical status for whatever is in the cell. "" when the cell is empty. */
+export function normalizeStatus(raw: string): LeadStatus | "" {
+  const t = (raw || "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  if (!t) return "";
+  const direct = (Object.values(STATUS) as string[]).find(
+    (v) => v.replace(/_/g, " ") === t,
+  );
+  if (direct) return direct as LeadStatus;
+  if (ALIASES[t]) return ALIASES[t];
+  return STATUS.not_interested; // unknown but deliberate → stop
+}
+
+/** What this row is allowed to receive. */
+export function policyFor(raw: string): Policy {
+  const s = normalizeStatus(raw);
+  return s ? POLICY[s] : ACTIVE;
+}
+
+/** Would `next` be an upgrade on `current`? Used to never soften a stop. */
+export function outranks(next: LeadStatus, current: string): boolean {
+  const cur = normalizeStatus(current);
+  if (!cur) return true;
+  return RANK[next] > RANK[cur];
 }
 
 // Inbound WhatsApp text that means "stop", matched case-insensitively against the
@@ -99,9 +197,9 @@ export const STOP_WORDS = [
   "leave me alone",
 ];
 
-export function classifyInbound(text: string): OptOutReason {
+export function classifyInbound(text: string): LeadStatus {
   const t = (text || "").trim().toLowerCase().replace(/[.!]+$/, "");
-  return STOP_WORDS.includes(t) ? OPT_OUT.unsubscribe : OPT_OUT.reply;
+  return STOP_WORDS.includes(t) ? STATUS.unsubscribed : STATUS.replied;
 }
 
 export type ReminderKind = "email" | "wa";

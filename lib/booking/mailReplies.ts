@@ -22,7 +22,7 @@ import { graphGet } from "./graph";
 import { setOptOut } from "./service";
 import { notifySlack } from "./slack";
 import { readSetting, writeSetting } from "./control";
-import { OPT_OUT, OptOutReason, STOP_WORDS } from "./config";
+import { STATUS, LeadStatus, STOP_WORDS } from "./config";
 
 const LAST_CHECK_KEY = "mail_last_checked";
 
@@ -54,7 +54,7 @@ const MACHINE_SUBJECT =
 
 export interface ReplyOutcome {
   address: string;
-  reason: OptOutReason;
+  reason: LeadStatus;
   matched: boolean;
   name?: string;
 }
@@ -89,17 +89,17 @@ export function isHumanReply(m: GraphMessage, ownDomains: string[]): boolean {
  * clearly asked to be removed, since that reads better in the sheet and in any
  * later conversation about what we did.
  */
-export function classifyReply(subject: string, body: string): OptOutReason {
+export function classifyReply(subject: string, body: string): LeadStatus {
   const s = (subject || "").toLowerCase();
   // The mailto: link in every email pre-fills exactly this subject, so it is a
   // deliberate opt-out no matter what the body says.
-  if (s.includes("unsubscribe")) return OPT_OUT.unsubscribe;
+  if (s.includes("unsubscribe")) return STATUS.unsubscribed;
 
   const text = (body || "").toLowerCase().replace(/\s+/g, " ").trim();
   if (STOP_WORDS.some((w) => text === w || text.startsWith(w + " ") || text.includes(` ${w} `))) {
-    return OPT_OUT.unsubscribe;
+    return STATUS.unsubscribed;
   }
-  return OPT_OUT.reply;
+  return STATUS.replied;
 }
 
 export async function pollMailReplies(): Promise<PollResult> {
@@ -147,7 +147,7 @@ export async function pollMailReplies(): Promise<PollResult> {
   // opt-out, not three, and if any of those messages was an explicit
   // unsubscribe that is the reason we record — taking whichever arrived first
   // would let a later "thanks" soften a real opt-out request.
-  const byPerson = new Map<string, { latest: GraphMessage; reason: OptOutReason }>();
+  const byPerson = new Map<string, { latest: GraphMessage; reason: LeadStatus }>();
   for (const m of messages) {
     const addr = (m.from?.emailAddress?.address || "").toLowerCase();
     if (!isHumanReply(m, ownDomains)) {
@@ -160,7 +160,7 @@ export async function pollMailReplies(): Promise<PollResult> {
     const prev = byPerson.get(addr);
     byPerson.set(addr, {
       latest: m, // messages are in ascending order, so this ends up the newest
-      reason: prev?.reason === OPT_OUT.unsubscribe ? OPT_OUT.unsubscribe : reason,
+      reason: prev?.reason === STATUS.unsubscribed ? STATUS.unsubscribed : reason,
     });
   }
 
