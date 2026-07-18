@@ -42,6 +42,7 @@ import { generatePass, generatePassBase64 } from "./pass";
 import { emailFor, waParamsFor, MsgCtx } from "./messages";
 import { dueForNurture, dueReminders, isQuietHours, nowIso } from "./schedule";
 import { phoneKey, toE164, isValidPhone } from "./phone";
+import { samePerson } from "./names";
 
 // ---- automation tab (ours) ----
 const A = {
@@ -880,18 +881,75 @@ export function optOutStateForToken(auto: Table, token: string): {
 export async function reconcileDuplicates(): Promise<{ retired: number; groups: number }> {
   return withSheetLock("reconcileDuplicates", async () => {
     const auto = await readTable(env.autoTab());
-    const byPhone = new Map<string, SheetRow[]>();
-    for (const r of auto.rows) {
+
+    // Rows still in play. An EMAIL_ONLY_REASON ("bounced") does NOT take a row
+    // out of contention: mail to it has stopped but WhatsApp has not, so it can
+    // still be half of a double-messaging pair.
+    const active = auto.rows.filter((r) => {
+      const reason = cell(auto, r, A.optedOut).trim().toLowerCase();
+      return !reason || EMAIL_ONLY_REASONS.includes(reason);
+    });
+
+    // Union-find over the active rows. Both passes below contribute edges, and a
+    // row can be caught by both — merging first means each cluster of duplicates
+    // elects exactly one keeper, instead of one pass retiring the very row the
+    // other pass elected to keep.
+    const parent = active.map((_, i) => i);
+    const find = (i: number): number => {
+      while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+      return i;
+    };
+    const union = (a: number, b: number) => {
+      const [ra, rb] = [find(a), find(b)];
+      if (ra !== rb) parent[ra] = rb;
+    };
+
+    // Pass 1 — same phone number. Same channel, so the name is irrelevant:
+    // whoever holds the phone gets the message either way.
+    const byPhone = new Map<string, number[]>();
+    active.forEach((r, i) => {
       const pk = cell(auto, r, A.phoneKey);
-      if (!pk) continue; // phone-less leads (e.g. email-only) can't be phone-deduped
-      if (cell(auto, r, A.optedOut)) continue; // already retired/opted-out
-      (byPhone.get(pk) ?? byPhone.set(pk, []).get(pk)!).push(r);
+      if (!pk) return; // phone-less leads can't be phone-deduped
+      (byPhone.get(pk) ?? byPhone.set(pk, []).get(pk)!).push(i);
+    });
+    for (const idxs of Array.from(byPhone.values())) {
+      for (let k = 1; k < idxs.length; k++) union(idxs[0], idxs[k]);
     }
+
+    // Pass 2 — same email AND the same person. Email alone is not enough:
+    // hello@ and info@ addresses are shared company mailboxes, so two colleagues
+    // can legitimately register from one. samePerson() is what keeps them apart,
+    // and it errs towards leaving a duplicate in place rather than retiring a
+    // real attendee.
+    const byEmail = new Map<string, number[]>();
+    active.forEach((r, i) => {
+      const em = cell(auto, r, A.email).trim().toLowerCase();
+      if (!em) return;
+      (byEmail.get(em) ?? byEmail.set(em, []).get(em)!).push(i);
+    });
+    for (const idxs of Array.from(byEmail.values())) {
+      if (idxs.length < 2) continue;
+      for (let a = 0; a < idxs.length; a++) {
+        for (let b = a + 1; b < idxs.length; b++) {
+          const na = cell(auto, active[idxs[a]], A.name);
+          const nb = cell(auto, active[idxs[b]], A.name);
+          if (samePerson(na, nb)) union(idxs[a], idxs[b]);
+        }
+      }
+    }
+
+    const clusters = new Map<number, number[]>();
+    active.forEach((_, i) => {
+      const root = find(i);
+      (clusters.get(root) ?? clusters.set(root, []).get(root)!).push(i);
+    });
+
     let retired = 0;
     let groups = 0;
-    for (const rows of Array.from(byPhone.values())) {
-      if (rows.length < 2) continue;
+    for (const idxs of Array.from(clusters.values())) {
+      if (idxs.length < 2) continue;
       groups++;
+      const rows = idxs.map((i) => active[i]);
       // Keeper: a registered row wins; otherwise the earliest-created.
       const keeper =
         rows.find((r) => isDone(cell(auto, r, A.done))) ??
