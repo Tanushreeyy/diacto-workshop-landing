@@ -661,12 +661,19 @@ async function recordPromo(ledger: PromoLedger, auto: Table, row: SheetRow): Pro
 // A lead's address/number, or "" when that channel is marked dead. Every send
 // site already skips a falsy value, so returning "" is all it takes to mute one
 // channel and leave the other running.
-export function emailUsable(auto: Table, row: SheetRow): string {
+// `switches` is required rather than optional on purpose. Folding the kill
+// switch in here — instead of checking it at each send site — is what stops a
+// disabled channel from being mistaken for an available one by runTick, which
+// has to decide whether a row is worth entering at all. An optional parameter
+// would let a future caller omit it and quietly get the old, wrong answer.
+export function emailUsable(auto: Table, row: SheetRow, switches: Switches): string {
+  if (!switches.email) return "";
   if (!policyFor(cell(auto, row, A.status)).email) return "";
   return cell(auto, row, A.email);
 }
 
-export function phoneUsable(auto: Table, row: SheetRow): string {
+export function phoneUsable(auto: Table, row: SheetRow, switches: Switches): string {
+  if (!switches.whatsapp) return "";
   if (!policyFor(cell(auto, row, A.status)).wa) return "";
   const phone = cell(auto, row, A.phone);
   // Enforced here as well as in the column, so a number that cannot possibly
@@ -682,8 +689,12 @@ async function nurtureLead(
   switches: Switches,
 ): Promise<void> {
   const name = cell(auto, row, A.name);
-  const phone = phoneUsable(auto, row);
-  const email = emailUsable(auto, row);
+  const phone = phoneUsable(auto, row, switches);
+  const email = emailUsable(auto, row, switches);
+  // Nothing can go out on any enabled channel, so claiming would burn a nurture
+  // stage and a daily slot for a message nobody receives. The row is left
+  // untouched and picked up whenever the channel comes back.
+  if (!phone && !email) return;
   const token = cell(auto, row, A.token);
   const ctx = ctxFor(name, token);
   const stage = parseInt(cell(auto, row, A.nurtureStage) || "0", 10) || 0;
@@ -710,7 +721,7 @@ async function nurtureLead(
   });
   await recordPromo(ledger, auto, row);
 
-  if (phone && switches.whatsapp) {
+  if (phone) {
     try {
       await sendTemplate({
         whatsappNumber: phone,
@@ -723,7 +734,7 @@ async function nurtureLead(
       console.error(`[nurture] WA failed:`, e);
     }
   }
-  if (email && switches.email) {
+  if (email) {
     try {
       const { subject, html } = emailFor(emailKind, ctx);
       await sendMail({ to: email, subject, html });
@@ -753,8 +764,8 @@ async function remindLead(
 
   const name = cell(auto, row, A.name) || "Guest";
   const company = cell(auto, row, A.company);
-  const email = emailUsable(auto, row);
-  const phone = phoneUsable(auto, row);
+  const email = emailUsable(auto, row, switches);
+  const phone = phoneUsable(auto, row, switches);
   const regId = cell(auto, row, A.regId);
   const token = cell(auto, row, A.token);
   const ctx = ctxFor(name, token, regId || undefined);
@@ -764,6 +775,14 @@ async function remindLead(
   const failed: string[] = [];
 
   for (const r of due) {
+    // Establish that this reminder CAN go out before claiming it. Claiming first
+    // and discovering the channel is unavailable afterwards loses the reminder
+    // for good: the key is written to reminders_sent, the rollback below only
+    // runs on a send failure, and dueReminders never returns a key it has seen.
+    // With email switched off that silently voids EM6/EM7/EM8 on event day — the
+    // attendee gets no pass and no directions, and nothing reports it.
+    if (r.kind === "email" ? !email : !phone) continue;
+
     // CLAIM THIS REMINDER BEFORE SENDING, then release it if the send fails.
     //
     // Same reasoning as nurture — recording after the send means a write failure
@@ -785,7 +804,6 @@ async function remindLead(
     }
     try {
       if (r.kind === "email") {
-        if (!email || !switches.email) continue;
         const kind = r.key === "EM6" ? "EM6" : r.key === "EM7" ? "EM7" : "EM8";
         const { subject, html } = emailFor(kind, ctx);
         const attachments = regId
@@ -799,7 +817,6 @@ async function remindLead(
           : undefined;
         await sendMail({ to: email, subject, html, attachments });
       } else {
-        if (!phone || !switches.whatsapp) continue;
         const tpl =
           r.key === "WA6"
             ? WA_TEMPLATES.WA6
@@ -1074,7 +1091,7 @@ export async function runTick(): Promise<TickSummary> {
     // Channel health is a separate question from intent: this person has not
     // asked us to stop, we simply have no working address or number left. Skip
     // rather than walk into nurtureLead and do nothing.
-    if (!emailUsable(auto, row) && !phoneUsable(auto, row)) {
+    if (!emailUsable(auto, row, switches) && !phoneUsable(auto, row, switches)) {
       summary.unreachable++;
       continue;
     }
