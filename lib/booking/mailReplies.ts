@@ -18,7 +18,9 @@
 // opt-outs would silently drop real prospects.
 
 import { env, Mailbox } from "./env";
+import { isBounceSubject, applyBounces } from "./bounces";
 import { graphGet } from "./graph";
+import { Table } from "./google";
 import { setOptOut } from "./service";
 import { notifySlack } from "./slack";
 import { readSetting, writeSetting } from "./control";
@@ -48,6 +50,10 @@ const PENDING_KEY = "mail_unmatched";
 // How long to keep retrying. Long enough for a blank contact column to be
 // restored by hand; short enough that a stranger's mail stops being retried.
 const UNMATCHED_TTL_HOURS = 72;
+
+// Report bodies fetched per mailbox per tick. One extra Graph call each, so a
+// relay outage that bounces everything cannot eat the whole time budget.
+const MAX_BOUNCE_BODIES = 15;
 
 interface Pending {
   addr: string;
@@ -117,6 +123,7 @@ export interface PollResult {
   unmatched: string[]; // replies from addresses not in the sheet
   skipped: { machine: number; internal: number };
   since: string;
+  bouncesSuppressed: number; // mailboxes marked dead from a non-delivery report
   available: boolean; // false when NO mailbox could be read
   /** One entry per watched mailbox, so a dead one is visible rather than silent. */
   boxes: MailboxOutcome[];
@@ -177,7 +184,9 @@ async function pollOne(
   box: Mailbox,
   idx: number,
   ownDomains: string[],
+  auto: Table | null,
 ): Promise<{
+  bounces: number;
   scanned: number;
   humanReplies: number;
   optedOut: number;
@@ -194,6 +203,7 @@ async function pollOne(
       : new Date(Date.now() - COLD_START_HOURS * 3_600_000).toISOString();
 
   const out = {
+    bounces: 0,
     scanned: 0,
     humanReplies: 0,
     optedOut: 0,
@@ -231,11 +241,18 @@ async function pollOne(
   // unsubscribe that is the reason we record — taking whichever arrived first
   // would let a later "thanks" soften a real opt-out request.
   const byPerson = new Map<string, { latest: GraphMessage; reason: LeadStatus }>();
+  // Non-delivery reports, kept aside rather than discarded. Their bodies are
+  // fetched below only for the ones that look like bounces — the list query does
+  // not select body, and pulling it for every message would be wasteful.
+  const bounceIds: string[] = [];
   for (const m of messages) {
     const addr = (m.from?.emailAddress?.address || "").toLowerCase();
     if (!isHumanReply(m, ownDomains)) {
       if (ownDomains.some((d) => addr.endsWith(d))) out.skipped.internal++;
       else out.skipped.machine++;
+      if (isBounceSubject(m.subject || "") && bounceIds.length < MAX_BOUNCE_BODIES) {
+        bounceIds.push(m.id);
+      }
       continue;
     }
     out.humanReplies++;
@@ -276,6 +293,26 @@ async function pollOne(
     }
   }
 
+  // Bounces. Only the report bodies say WHY a message failed, and only "their
+  // mailbox is gone" is safe to act on — see bounces.ts for why the rest are
+  // deliberately left alone.
+  if (bounceIds.length && auto) {
+    const reports: { subject: string; body: string }[] = [];
+    for (const id of bounceIds) {
+      const full = await graphGet<{ subject?: string; body?: { content?: string } }>(
+        `/users/${encodeURIComponent(box.upn)}/messages/${encodeURIComponent(id)}?$select=subject,body`,
+        box,
+      );
+      if (full) reports.push({ subject: full.subject || "", body: full.body?.content || "" });
+    }
+    try {
+      const b = await applyBounces(reports, auto, ownDomains);
+      out.bounces = b.suppressed.length;
+    } catch (e) {
+      console.error(`[mailReplies] bounces:`, e);
+    }
+  }
+
   // Advance the watermark, and GUARANTEE it moves.
   //
   // Graph keeps sub-second precision internally but only renders whole seconds
@@ -303,7 +340,7 @@ async function pollOne(
   return out;
 }
 
-export async function pollMailReplies(): Promise<PollResult> {
+export async function pollMailReplies(auto: Table | null = null): Promise<PollResult> {
   let boxes: Mailbox[];
   try {
     boxes = env.mailboxes();
@@ -343,6 +380,7 @@ export async function pollMailReplies(): Promise<PollResult> {
     unmatched: [],
     skipped: { machine: 0, internal: 0 },
     since: "",
+    bouncesSuppressed: 0,
     available: false,
     boxes: [],
   };
@@ -354,13 +392,14 @@ export async function pollMailReplies(): Promise<PollResult> {
     // not stop the others being read — that would turn a single revoked grant
     // into total silence on every channel we listen to.
     try {
-      const r = await pollOne(box, idx, ownDomains);
+      const r = await pollOne(box, idx, ownDomains, auto);
       result.scanned += r.scanned;
       result.humanReplies += r.humanReplies;
       result.optedOut += r.optedOut;
       result.skipped.machine += r.skipped.machine;
       result.skipped.internal += r.skipped.internal;
       result.unmatched.push(...r.unmatched);
+      result.bouncesSuppressed += r.bounces;
       freshUnmatched.push(...r.fresh);
       if (idx === 0) result.since = r.since;
       if (r.available) result.available = true;

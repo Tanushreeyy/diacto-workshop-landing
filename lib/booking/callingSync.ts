@@ -38,6 +38,7 @@ export interface CallingSyncResult {
   applied: number;
   skipped: number; // already at an equal or stronger status
   unmatched: number; // calling rows with no automation row
+  error?: string; // set when the tab exists but could not be read this tick
 }
 
 export async function syncCallingDispositions(
@@ -55,8 +56,17 @@ export async function syncCallingDispositions(
   let call;
   try {
     call = await readTable(tabName);
-  } catch {
-    result.available = false; // no calling tab in this environment — fine
+  } catch (e) {
+    result.available = false;
+    // A missing tab is a normal state — staging has no calling sheet, and that
+    // is fine. A rate limit or a server error is NOT, and swallowing it as "no
+    // tab here" means dispositions stop syncing with nothing to show for it.
+    // That is exactly how this looked when the read quota was exhausted: the
+    // callers' Not Interested never reached the automation tab, silently.
+    const status = Number((e as { status?: number; code?: number })?.status ?? (e as { code?: number })?.code);
+    if (status === 429 || status === 503 || status >= 500) {
+      result.error = `calling tab '${tabName}' unreadable (${status}) — dispositions not synced this tick`;
+    }
     return result;
   }
 

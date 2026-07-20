@@ -1062,6 +1062,8 @@ export async function runTick(): Promise<TickSummary> {
     if (env.callingTab()) {
       const sync = await syncCallingDispositions();
       summary.callerStops = sync.applied;
+      // A tab that exists but could not be read is an error, not an absence.
+      if (sync.error) summary.errors.push(sync.error);
       if (sync.applied) {
         await notifySlack(
           `:telephone_receiver: Applied *${sync.applied}* disposition(s) from the calling sheet — those leads will no longer be chased.`,
@@ -1078,7 +1080,7 @@ export async function runTick(): Promise<TickSummary> {
   // missing consent degrades to "we stop noticing replies", which is bad, but
   // not as bad as no reminders going out at all.
   try {
-    const replies = await pollMailReplies();
+    const replies = await pollMailReplies(auto);
     summary.repliesStopped = replies.optedOut;
     if (!replies.available) {
       summary.errors.push("mail replies: Mail.Read not granted — replies unseen");
