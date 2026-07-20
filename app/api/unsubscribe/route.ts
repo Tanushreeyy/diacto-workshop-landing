@@ -75,7 +75,13 @@ export async function GET(req: NextRequest) {
   }
 
   // Look up their current state so the page reflects reality.
-  let state: { found: boolean; name?: string; optedOut?: string };
+  //
+  // The field is `status`, and it must stay named that: this used to declare
+  // `optedOut`, which optOutStateForToken has never returned. TypeScript allowed
+  // it — excess-property checks do not apply to a function's return value — so
+  // every read of it was undefined, and someone who had already unsubscribed was
+  // shown the "Unsubscribe?" button again as though nothing had happened.
+  let state: { found: boolean; name?: string; status?: string };
   try {
     const auto = await readTable(env.autoTab());
     state = optOutStateForToken(auto, rid);
@@ -88,7 +94,7 @@ export async function GET(req: NextRequest) {
   const name = escapeHtml(state.name || "there");
 
   if (resub) {
-    if (!state.optedOut) {
+    if (!state.status) {
       return html(page({ title: "Subscribed", heading: `You're already subscribed, ${name}`, body: "You'll keep receiving updates about the workshop. Nothing to do." }));
     }
     return html(page({
@@ -99,7 +105,7 @@ export async function GET(req: NextRequest) {
     }));
   }
 
-  if (state.optedOut) {
+  if (state.status) {
     return html(page({
       title: "Already unsubscribed",
       heading: `You're already unsubscribed, ${name}`,

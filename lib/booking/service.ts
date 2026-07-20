@@ -61,6 +61,7 @@ import { phoneKey, toE164, isValidPhone, phoneProblem } from "./phone";
 import { samePerson } from "./names";
 import { pollMailReplies } from "./mailReplies";
 import { syncCallingDispositions } from "./callingSync";
+import { checkWhatsAppDelivery } from "./delivery";
 
 // ---- automation tab (ours) ----
 const A = {
@@ -869,6 +870,7 @@ export interface TickSummary {
   deferredIngest: number; // form rows left in place because no channel could carry WA-1/EM-1
   repliesStopped: number; // leads opted out this tick because they replied by email
   callerStops: number; // leads stopped this tick by a calling-team disposition
+  deliveryFailed: number; // messages WATI accepted and Meta then refused
   truncated: boolean; // hit the time budget — the next tick picks up the rest
   errors: string[];
 }
@@ -910,6 +912,7 @@ export async function runTick(): Promise<TickSummary> {
     deferredIngest: 0,
     repliesStopped: 0,
     callerStops: 0,
+    deliveryFailed: 0,
     truncated: false,
     errors: [],
   };
@@ -1172,6 +1175,23 @@ export async function runTick(): Promise<TickSummary> {
     } catch (e) {
       summary.errors.push(`row ${row.rowNumber}: ${(e as Error).message}`);
     }
+  }
+
+  // 3) DELIVERY — messages WATI accepted and Meta then refused.
+  //
+  // Runs last, and only reports. Acceptance is not delivery: reminders_sent is
+  // written when WATI returns 200, so a message Meta drops afterwards reads as
+  // delivered forever. Naming those people is the difference between a reminder
+  // that quietly did not arrive and one somebody can act on.
+  //
+  // Never allowed to sink the tick — a delivery check that breaks the campaign
+  // is worse than one that does not run.
+  try {
+    const d = await checkWhatsAppDelivery(auto);
+    summary.deliveryFailed = d.failed;
+    if (!d.available) summary.errors.push("delivery check: WATI contacts/messages not readable");
+  } catch (e) {
+    summary.errors.push(`delivery check: ${(e as Error).message}`);
   }
 
   if (summary.errors.length) {
