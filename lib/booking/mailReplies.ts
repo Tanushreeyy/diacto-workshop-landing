@@ -30,6 +30,57 @@ const LAST_CHECK_KEY = "mail_last_checked";
 // campaign's replies, short enough not to re-process ancient history.
 const COLD_START_HOURS = 72;
 
+// Replies we could not match to a row, parked so they are not lost.
+//
+// The watermark advances on the newest message SCANNED, which used to mean an
+// unmatched reply was consumed and gone: the filter below is `gt`, so it is
+// never read a second time. That is how an "Unsubscribe - Workshop" mail sent on
+// 18 July was dropped — the sender's row had a blank email cell, nothing matched,
+// and the watermark moved past it anyway. A consent request is the last thing
+// this system should lose silently.
+//
+// Holding the watermark back instead would fix that case and break a worse one:
+// mail from someone genuinely not in the sheet never matches, so the poll would
+// re-read and re-announce it every five minutes forever. Parking the address
+// keeps both properties — nothing is lost, nothing repeats.
+const PENDING_KEY = "mail_unmatched";
+
+// How long to keep retrying. Long enough for a blank contact column to be
+// restored by hand; short enough that a stranger's mail stops being retried.
+const UNMATCHED_TTL_HOURS = 72;
+
+interface Pending {
+  addr: string;
+  at: string; // receivedDateTime of the message
+  reason: LeadStatus;
+  text: string;
+}
+
+// One line per address, fields pipe-separated, the reply text percent-encoded so
+// it cannot smuggle a delimiter or a newline into the cell.
+function encodePending(list: Pending[]): string {
+  return list
+    .map((p) => [p.addr, p.at, p.reason, encodeURIComponent(p.text || "")].join("|"))
+    .join("\n");
+}
+
+function decodePending(raw: string | null): Pending[] {
+  if (!raw) return [];
+  const out: Pending[] = [];
+  for (const line of raw.split("\n")) {
+    const [addr, at, reason, text] = line.split("|");
+    if (!addr || !at) continue;
+    let decoded = "";
+    try {
+      decoded = decodeURIComponent(text || "");
+    } catch {
+      decoded = text || ""; // a hand-edited cell must not break the poll
+    }
+    out.push({ addr, at, reason: (reason as LeadStatus) || STATUS.replied, text: decoded });
+  }
+  return out;
+}
+
 interface GraphMessage {
   id: string;
   receivedDateTime: string;
@@ -164,8 +215,12 @@ export async function pollMailReplies(): Promise<PollResult> {
     });
   }
 
+  // Replies that matched nothing this pass. Parked below rather than dropped.
+  const freshUnmatched: Pending[] = [];
+
   for (const [addr, { latest: m, reason }] of Array.from(byPerson.entries())) {
     try {
+      const text = `${m.subject || ""} — ${m.bodyPreview || ""}`;
       const out = await setOptOut(
         { email: addr },
         reason,
@@ -174,10 +229,11 @@ export async function pollMailReplies(): Promise<PollResult> {
           : STATUS_SOURCE.reply,
         // Kept so a caller can see what the person actually said, rather than
         // only that "something" arrived.
-        `${m.subject || ""} — ${m.bodyPreview || ""}`,
+        text,
       );
       if (!out.found) {
         result.unmatched.push(addr);
+        freshUnmatched.push({ addr, at: m.receivedDateTime, reason, text });
         continue;
       }
       if (out.alreadyOut) continue; // already stopped; don't re-announce
@@ -193,17 +249,75 @@ export async function pollMailReplies(): Promise<PollResult> {
     }
   }
 
-  if (result.unmatched.length) {
+  // Retry everything parked on an earlier pass. The usual reason one of these
+  // starts matching is that the row it belongs to got its contact details back,
+  // which is exactly the case that used to be unrecoverable.
+  const parkedRaw = await readSetting(PENDING_KEY);
+  const parked = decodePending(parkedRaw);
+  const cutoff = Date.now() - UNMATCHED_TTL_HOURS * 3_600_000;
+  const stillPending: Pending[] = [];
+  const expired: string[] = [];
+
+  for (const p of parked) {
+    // Anything re-reported by this pass is handled by freshUnmatched below.
+    if (freshUnmatched.some((f) => f.addr === p.addr)) continue;
+    try {
+      const out = await setOptOut(
+        { email: p.addr },
+        p.reason,
+        p.reason === STATUS.unsubscribed ? STATUS_SOURCE.unsubscribe_link : STATUS_SOURCE.reply,
+        p.text,
+      );
+      if (out.found) {
+        if (!out.alreadyOut) {
+          result.optedOut++;
+          await notifySlack(
+            `:no_entry_sign: *${out.name || p.addr} replied — all messaging stopped* (${p.reason})\n` +
+              `> ${p.text.slice(0, 200)}\n` +
+              `This reply arrived ${p.at.slice(0, 16)} and could not be matched to a row at the time. ` +
+              `It has been applied now.`,
+          );
+        }
+        continue; // matched — drop it from the list
+      }
+    } catch (e) {
+      console.error(`[mailReplies] retry ${p.addr}:`, e);
+      stillPending.push(p); // a transient failure must not discard the reply
+      continue;
+    }
+    if (Date.parse(p.at) < cutoff) expired.push(p.addr);
+    else stillPending.push(p);
+  }
+
+  if (expired.length) {
     await notifySlack(
-      `:mag: ${result.unmatched.length} reply/replies from address(es) not in the sheet: ` +
-        `${result.unmatched.slice(0, 5).join(", ")}${result.unmatched.length > 5 ? "…" : ""}. ` +
-        `Nothing was stopped for them — worth a look in case they replied from a different address.`,
+      `:hourglass: Gave up matching ${expired.length} reply/replies after ${UNMATCHED_TTL_HOURS}h: ` +
+        `${expired.slice(0, 5).join(", ")}${expired.length > 5 ? "…" : ""}. ` +
+        `They were never found in the sheet — if any of them is a real lead, stop them by hand.`,
     );
   }
 
-  // Advance the watermark only after the work is done, so a crash mid-poll means
-  // the next tick re-reads those messages rather than losing them. setOptOut is
-  // idempotent, so re-reading is harmless.
+  // Announce only the ones seen for the first time, so a parked address does not
+  // put the same line in Slack every five minutes.
+  if (freshUnmatched.length) {
+    await notifySlack(
+      `:mag: ${freshUnmatched.length} reply/replies from address(es) not in the sheet: ` +
+        `${freshUnmatched.map((f) => f.addr).slice(0, 5).join(", ")}${freshUnmatched.length > 5 ? "…" : ""}. ` +
+        `Nothing was stopped for them yet — they will be retried for ${UNMATCHED_TTL_HOURS}h ` +
+        `in case the row is missing its contact details.`,
+    );
+  }
+
+  // Only write when it actually changed. This runs every tick, and an
+  // unconditional write would be a Sheets call every five minutes forever just
+  // to store the same empty string.
+  const nextPending = encodePending([...stillPending, ...freshUnmatched]);
+  if (nextPending !== (parkedRaw ?? "")) await writeSetting(PENDING_KEY, nextPending);
+
+  // Safe to advance now: anything this pass could not apply has been parked
+  // above, so moving past it no longer loses it. The filter is `gt`, so a
+  // watermark that ran ahead of an unapplied message used to make that message
+  // permanently unreadable.
   const newest = messages.length ? messages[messages.length - 1].receivedDateTime : null;
   if (newest) await writeSetting(LAST_CHECK_KEY, newest);
 

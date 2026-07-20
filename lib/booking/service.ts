@@ -866,6 +866,7 @@ export interface TickSummary {
   switches: string; // which switches were in effect this tick
   halted: boolean; // preflight refused to run — the sheet looks damaged
   throttled: number; // rows held back by the per-person daily promo limit
+  deferredIngest: number; // form rows left in place because no channel could carry WA-1/EM-1
   repliesStopped: number; // leads opted out this tick because they replied by email
   callerStops: number; // leads stopped this tick by a calling-team disposition
   truncated: boolean; // hit the time budget — the next tick picks up the rest
@@ -906,6 +907,7 @@ export async function runTick(): Promise<TickSummary> {
       ` | email=${switches.email} whatsapp=${switches.whatsapp} [${switches.source}]`,
     halted: false,
     throttled: 0,
+    deferredIngest: 0,
     repliesStopped: 0,
     callerStops: 0,
     truncated: false,
@@ -985,6 +987,32 @@ export async function runTick(): Promise<TickSummary> {
       if (!leadId || (!email && !phone)) continue;
       if (knownIds.has(leadId) || (phone && knownPhones.has(phoneKey(phone)))) continue;
       if (isTestLead(name, email, phone)) continue;
+
+      // Do not create the row until a channel can actually carry the welcome.
+      //
+      // WA-1 and EM-1 are sent by ingestLead and NOWHERE else, while the append
+      // stamps promo_today and last_nudge_at. Ingesting with the channel switched
+      // off therefore burns the welcome permanently: the row exists, nothing was
+      // sent, and when the switch comes back the lead is at stage 0 and gets WA-2
+      // — never the registration link that WA-1 carries. Leaving the form row
+      // alone costs nothing, because ingest is driven off the form tab and will
+      // pick it up on the tick after the switch flips.
+      //
+      // The test is deliberately about the SWITCHES, not the lead. Someone whose
+      // number is unusable and who left no email still gets a row, exactly as
+      // before, so a human can see them and fix it.
+      const e164 = toE164(phone);
+      const waPossible = !!e164 && !phoneProblem(e164);
+      const emailPossible = !!email;
+      const canSendNow =
+        (waPossible && switches.whatsapp) || (emailPossible && switches.email);
+      const blockedOnlyBySwitch =
+        (waPossible && !switches.whatsapp) || (emailPossible && !switches.email);
+      if (!canSendNow && blockedOnlyBySwitch) {
+        summary.deferredIngest++;
+        continue;
+      }
+
       try {
         await ingestLead(
           auto,
