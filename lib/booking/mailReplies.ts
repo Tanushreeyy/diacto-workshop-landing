@@ -276,11 +276,29 @@ async function pollOne(
     }
   }
 
-  // Safe to advance: anything this pass could not apply is parked by the caller,
-  // so moving past it no longer loses it. The filter is `gt`, so a watermark
-  // that ran ahead of an unapplied message used to make it permanently unreadable.
+  // Advance the watermark, and GUARANTEE it moves.
+  //
+  // Graph keeps sub-second precision internally but only renders whole seconds
+  // in receivedDateTime. Storing what we were shown and filtering `gt` on it
+  // therefore re-matches the same message every pass: 16:16:58Z is not greater
+  // than 16:16:58.472Z. That is not theoretical — one unsubscribe sat in this
+  // loop from 18 July, re-read and re-announced every five minutes, and the
+  // watermark could never get past it.
+  //
+  // So when the newest message is not strictly ahead of where we started, step
+  // one second beyond `since` instead. The cost is that a message arriving in
+  // that same second could be skipped; the alternative is a poll that can never
+  // move on, which is strictly worse.
   const newest = messages.length ? messages[messages.length - 1].receivedDateTime : null;
-  if (newest) await writeSetting(lastCheckKey(idx), newest);
+  if (newest) {
+    const newestMs = Date.parse(newest);
+    const sinceMs = Date.parse(since);
+    const next =
+      Number.isFinite(newestMs) && newestMs > sinceMs
+        ? newest
+        : new Date(sinceMs + 1000).toISOString();
+    await writeSetting(lastCheckKey(idx), next);
+  }
 
   return out;
 }
@@ -400,12 +418,19 @@ export async function pollMailReplies(): Promise<PollResult> {
     );
   }
 
-  // Announce only the ones seen for the first time, so a parked address does not
-  // put the same line in Slack every five minutes.
-  if (freshUnmatched.length) {
+  // Announce only addresses never parked before.
+  //
+  // "Fresh" cannot mean "unmatched on this pass": a message the inbox keeps
+  // handing back is unmatched on EVERY pass, which is precisely how one
+  // unsubscribe put the same line in Slack every five minutes for two days.
+  // Checking against what is already parked is what makes the notice once-only,
+  // independent of whether the read side ever repeats itself.
+  const known = new Set(parked.map((p) => p.addr));
+  const firstSeen = freshUnmatched.filter((f) => !known.has(f.addr));
+  if (firstSeen.length) {
     await notifySlack(
-      `:mag: ${freshUnmatched.length} reply/replies from address(es) not in the sheet: ` +
-        `${freshUnmatched.map((f) => f.addr).slice(0, 5).join(", ")}${freshUnmatched.length > 5 ? "…" : ""}. ` +
+      `:mag: ${firstSeen.length} reply/replies from address(es) not in the sheet: ` +
+        `${firstSeen.map((f) => f.addr).slice(0, 5).join(", ")}${firstSeen.length > 5 ? "…" : ""}. ` +
         `Nothing was stopped for them yet — they will be retried for ${UNMATCHED_TTL_HOURS}h ` +
         `in case the row is missing its contact details.`,
     );
