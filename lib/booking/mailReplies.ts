@@ -321,16 +321,19 @@ export async function pollMailReplies(): Promise<PollResult> {
     ];
   }
 
-  // Our own people talking to a workshop mailbox are not leads. Derived from the
-  // mailboxes themselves so adding one in a new domain cannot silently turn our
-  // own staff into opt-outs.
+  // Our own people talking to a workshop mailbox are not leads.
+  //
+  // The union of the watched mailboxes' own domains and the configured list.
+  // Deriving from the mailboxes alone silently drops a domain the moment the
+  // inbox moves — which is exactly what the July move to diactocandidhr.com did
+  // to "@diacto.com" — so OWN_DOMAINS names them explicitly and this only adds.
   const ownDomains = Array.from(
-    new Set(
-      boxes
+    new Set([
+      ...boxes
         .map((b) => "@" + (b.upn.split("@")[1] || "").toLowerCase())
-        .filter((d) => d.length > 1)
-        .concat("@salesup.club"),
-    ),
+        .filter((d) => d.length > 1),
+      ...env.ownDomains(),
+    ]),
   );
 
   const result: PollResult = {

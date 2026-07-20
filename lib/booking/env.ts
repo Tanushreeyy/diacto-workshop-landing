@@ -30,6 +30,22 @@ export const env = {
   azureClientSecret: () => req("AZURE_CLIENT_SECRET"),
   graphSender: () => opt("GRAPH_SENDER_UPN", "workshop@diacto.com"),
 
+  /**
+   * Domains whose senders are US, not leads.
+   *
+   * Deriving this from the watched mailboxes alone is not enough, and the July
+   * mailbox move proved it: once the inbox became workshop@diactocandidhr.com,
+   * "@diacto.com" fell off the list, and every mail from the client's own staff
+   * would have been read as a lead reply — attempted opt-out, no match, parked,
+   * Slack notice, every time. The client's other domains have to be named.
+   */
+  ownDomains: (): string[] =>
+    opt("OWN_DOMAINS", "diacto.com,diactocandidhr.com,salesup.club")
+      .split(",")
+      .map((d) => d.trim().toLowerCase().replace(/^@/, ""))
+      .filter(Boolean)
+      .map((d) => `@${d}`),
+
   graphCreds: (): GraphCreds => ({
     tenantId: req("AZURE_TENANT_ID"),
     clientId: req("AZURE_CLIENT_ID"),
