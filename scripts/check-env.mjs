@@ -44,6 +44,19 @@ for (const k of REQUIRED) (env[k] ? ok(k) : fail(`${k} is missing`));
 
 // notifySlack() returns silently when this is empty, so an unset webhook is not
 // a loud failure — it means every alert the system raises goes nowhere.
+// The second mailbox is all-or-nothing. A half-configured tenant fails its token
+// request every tick and reads nothing, which is indistinguishable from "nobody
+// replied" — the exact failure this whole check exists to prevent.
+const MB2 = ["GRAPH_MAILBOX_2", "AZURE_TENANT_ID_2", "AZURE_CLIENT_ID_2", "AZURE_CLIENT_SECRET_2"];
+const mb2set = MB2.filter((k) => env[k]);
+if (mb2set.length === 0) {
+  console.log("  ok    second mailbox not configured (only " + (env.GRAPH_SENDER_UPN || "the primary") + " is watched)");
+} else if (mb2set.length === 4) {
+  ok(`second mailbox ${env.GRAPH_MAILBOX_2} configured`);
+} else {
+  fail(`second mailbox half-configured — set all 4 or none. Missing: ${MB2.filter((k) => !env[k]).join(", ")}`);
+}
+
 console.log("\n2. alerting");
 if (!env.SLACK_WEBHOOK_URL) {
   fail("SLACK_WEBHOOK_URL is empty — the damaged-sheet halt, header-edit warning and reply alerts will all go NOWHERE");

@@ -17,7 +17,7 @@
 // out-of-office autoreplies are not the lead talking, and treating them as
 // opt-outs would silently drop real prospects.
 
-import { env } from "./env";
+import { env, Mailbox } from "./env";
 import { graphGet } from "./graph";
 import { setOptOut } from "./service";
 import { notifySlack } from "./slack";
@@ -117,7 +117,9 @@ export interface PollResult {
   unmatched: string[]; // replies from addresses not in the sheet
   skipped: { machine: number; internal: number };
   since: string;
-  available: boolean; // false when Mail.Read is not granted
+  available: boolean; // false when NO mailbox could be read
+  /** One entry per watched mailbox, so a dead one is visible rather than silent. */
+  boxes: MailboxOutcome[];
 }
 
 /** Is this message a human replying, rather than a mail system? */
@@ -153,22 +155,51 @@ export function classifyReply(subject: string, body: string): LeadStatus {
   return STATUS.replied;
 }
 
-export async function pollMailReplies(): Promise<PollResult> {
-  const upn = env.graphSender();
-  const ownDomains = ["@diacto.com", "@salesup.club"];
+/** Per-mailbox watermark. The first keeps the original key so the live value survives. */
+const lastCheckKey = (idx: number) => (idx === 0 ? LAST_CHECK_KEY : `${LAST_CHECK_KEY}_${idx + 1}`);
 
-  const stored = await readSetting(LAST_CHECK_KEY);
+export interface MailboxOutcome {
+  upn: string;
+  available: boolean;
+  scanned: number;
+  error?: string;
+}
+
+/**
+ * Read one inbox and act on it.
+ *
+ * Deliberately does NOT touch the parked list: retrying a parked reply is a
+ * sheet operation that has nothing to do with Graph, so it belongs outside the
+ * per-mailbox loop. Keeping it there is what lets a parked reply still be
+ * applied after the mailbox it arrived in has been deleted.
+ */
+async function pollOne(
+  box: Mailbox,
+  idx: number,
+  ownDomains: string[],
+): Promise<{
+  scanned: number;
+  humanReplies: number;
+  optedOut: number;
+  skipped: { machine: number; internal: number };
+  unmatched: string[];
+  fresh: Pending[];
+  since: string;
+  available: boolean;
+}> {
+  const stored = await readSetting(lastCheckKey(idx));
   const since =
     stored && !Number.isNaN(Date.parse(stored))
       ? stored
       : new Date(Date.now() - COLD_START_HOURS * 3_600_000).toISOString();
 
-  const result: PollResult = {
+  const out = {
     scanned: 0,
     humanReplies: 0,
     optedOut: 0,
-    unmatched: [],
     skipped: { machine: 0, internal: 0 },
+    unmatched: [] as string[],
+    fresh: [] as Pending[],
     since,
     available: true,
   };
@@ -176,22 +207,23 @@ export async function pollMailReplies(): Promise<PollResult> {
   // Graph wants the filter timestamp without milliseconds.
   const sinceParam = new Date(since).toISOString().replace(/\.\d+Z$/, "Z");
   const page = await graphGet<{ value: GraphMessage[] }>(
-    `/users/${encodeURIComponent(upn)}/mailFolders/inbox/messages` +
+    `/users/${encodeURIComponent(box.upn)}/mailFolders/inbox/messages` +
       `?$top=100&$orderby=receivedDateTime desc` +
       `&$filter=receivedDateTime gt ${sinceParam}` +
       `&$select=id,receivedDateTime,subject,bodyPreview,from`,
+    box,
   );
 
-  // Null means Mail.Read isn't granted. Say so once and carry on — the rest of
-  // the tick is unaffected, and opt-outs can still be typed into the sheet.
+  // Null means this mailbox cannot be read: consent revoked, or the mailbox
+  // itself deleted. Either way the OTHER mailboxes and the rest of the tick are
+  // unaffected, and opt-outs can still be typed into the sheet.
   if (page === null) {
-    result.available = false;
-    return result;
+    out.available = false;
+    return out;
   }
 
   const messages = page.value || [];
-  result.scanned = messages.length;
-
+  out.scanned = messages.length;
   messages.sort((a, b) => a.receivedDateTime.localeCompare(b.receivedDateTime));
 
   // Aggregate per person before acting. Someone who writes three times is one
@@ -202,11 +234,11 @@ export async function pollMailReplies(): Promise<PollResult> {
   for (const m of messages) {
     const addr = (m.from?.emailAddress?.address || "").toLowerCase();
     if (!isHumanReply(m, ownDomains)) {
-      if (ownDomains.some((d) => addr.endsWith(d))) result.skipped.internal++;
-      else result.skipped.machine++;
+      if (ownDomains.some((d) => addr.endsWith(d))) out.skipped.internal++;
+      else out.skipped.machine++;
       continue;
     }
-    result.humanReplies++;
+    out.humanReplies++;
     const reason = classifyReply(m.subject || "", m.bodyPreview || "");
     const prev = byPerson.get(addr);
     byPerson.set(addr, {
@@ -215,43 +247,114 @@ export async function pollMailReplies(): Promise<PollResult> {
     });
   }
 
-  // Replies that matched nothing this pass. Parked below rather than dropped.
-  const freshUnmatched: Pending[] = [];
-
   for (const [addr, { latest: m, reason }] of Array.from(byPerson.entries())) {
     try {
       const text = `${m.subject || ""} — ${m.bodyPreview || ""}`;
-      const out = await setOptOut(
+      const res = await setOptOut(
         { email: addr },
         reason,
-        reason === STATUS.unsubscribed
-          ? STATUS_SOURCE.unsubscribe_link
-          : STATUS_SOURCE.reply,
+        reason === STATUS.unsubscribed ? STATUS_SOURCE.unsubscribe_link : STATUS_SOURCE.reply,
         // Kept so a caller can see what the person actually said, rather than
         // only that "something" arrived.
         text,
       );
-      if (!out.found) {
-        result.unmatched.push(addr);
-        freshUnmatched.push({ addr, at: m.receivedDateTime, reason, text });
+      if (!res.found) {
+        out.unmatched.push(addr);
+        out.fresh.push({ addr, at: m.receivedDateTime, reason, text });
         continue;
       }
-      if (out.alreadyOut) continue; // already stopped; don't re-announce
-      result.optedOut++;
+      if (res.alreadyOut) continue; // already stopped; don't re-announce
+      out.optedOut++;
       await notifySlack(
-        `:no_entry_sign: *${out.name || addr} replied — all messaging stopped* (${reason})\n` +
+        `:no_entry_sign: *${res.name || addr} replied — all messaging stopped* (${reason})\n` +
           `> ${(m.subject || "").slice(0, 120)}\n` +
           (m.bodyPreview ? `> ${m.bodyPreview.replace(/\s+/g, " ").slice(0, 200)}\n` : "") +
           `They will get no further follow-ups or reminders. Someone should reply to them personally.`,
       );
     } catch (e) {
-      console.error(`[mailReplies] ${addr}:`, e);
+      console.error(`[mailReplies] ${box.upn} ${addr}:`, e);
     }
   }
 
-  // Retry everything parked on an earlier pass. The usual reason one of these
-  // starts matching is that the row it belongs to got its contact details back,
-  // which is exactly the case that used to be unrecoverable.
+  // Safe to advance: anything this pass could not apply is parked by the caller,
+  // so moving past it no longer loses it. The filter is `gt`, so a watermark
+  // that ran ahead of an unapplied message used to make it permanently unreadable.
+  const newest = messages.length ? messages[messages.length - 1].receivedDateTime : null;
+  if (newest) await writeSetting(lastCheckKey(idx), newest);
+
+  return out;
+}
+
+export async function pollMailReplies(): Promise<PollResult> {
+  let boxes: Mailbox[];
+  try {
+    boxes = env.mailboxes();
+  } catch (e) {
+    // A half-configured second tenant. Loud, and then carry on with the primary
+    // rather than leaving every inbox unread.
+    await notifySlack(`:warning: Mailbox config problem — ${(e as Error).message}`);
+    boxes = [
+      {
+        upn: env.graphSender(),
+        tenantId: env.azureTenantId(),
+        clientId: env.azureClientId(),
+        clientSecret: env.azureClientSecret(),
+      },
+    ];
+  }
+
+  // Our own people talking to a workshop mailbox are not leads. Derived from the
+  // mailboxes themselves so adding one in a new domain cannot silently turn our
+  // own staff into opt-outs.
+  const ownDomains = Array.from(
+    new Set(
+      boxes
+        .map((b) => "@" + (b.upn.split("@")[1] || "").toLowerCase())
+        .filter((d) => d.length > 1)
+        .concat("@salesup.club"),
+    ),
+  );
+
+  const result: PollResult = {
+    scanned: 0,
+    humanReplies: 0,
+    optedOut: 0,
+    unmatched: [],
+    skipped: { machine: 0, internal: 0 },
+    since: "",
+    available: false,
+    boxes: [],
+  };
+
+  const freshUnmatched: Pending[] = [];
+
+  for (const [idx, box] of Array.from(boxes.entries())) {
+    // Each mailbox is isolated. One being deleted, or its consent pulled, must
+    // not stop the others being read — that would turn a single revoked grant
+    // into total silence on every channel we listen to.
+    try {
+      const r = await pollOne(box, idx, ownDomains);
+      result.scanned += r.scanned;
+      result.humanReplies += r.humanReplies;
+      result.optedOut += r.optedOut;
+      result.skipped.machine += r.skipped.machine;
+      result.skipped.internal += r.skipped.internal;
+      result.unmatched.push(...r.unmatched);
+      freshUnmatched.push(...r.fresh);
+      if (idx === 0) result.since = r.since;
+      if (r.available) result.available = true;
+      result.boxes.push({ upn: box.upn, available: r.available, scanned: r.scanned });
+    } catch (e) {
+      const why = (e as Error).message;
+      console.error(`[mailReplies] ${box.upn} unreadable:`, e);
+      result.boxes.push({ upn: box.upn, available: false, scanned: 0, error: why });
+    }
+  }
+
+  // Retry everything parked on an earlier pass. ONE shared list, deliberately:
+  // this only reads and writes the sheet, so it must keep working for a reply
+  // whose mailbox has since been deleted. The usual reason one starts matching
+  // is that the row it belongs to got its contact details back.
   const parkedRaw = await readSetting(PENDING_KEY);
   const parked = decodePending(parkedRaw);
   const cutoff = Date.now() - UNMATCHED_TTL_HOURS * 3_600_000;
@@ -314,12 +417,8 @@ export async function pollMailReplies(): Promise<PollResult> {
   const nextPending = encodePending([...stillPending, ...freshUnmatched]);
   if (nextPending !== (parkedRaw ?? "")) await writeSetting(PENDING_KEY, nextPending);
 
-  // Safe to advance now: anything this pass could not apply has been parked
-  // above, so moving past it no longer loses it. The filter is `gt`, so a
-  // watermark that ran ahead of an unapplied message used to make that message
-  // permanently unreadable.
-  const newest = messages.length ? messages[messages.length - 1].receivedDateTime : null;
-  if (newest) await writeSetting(LAST_CHECK_KEY, newest);
+  const dead = result.boxes.filter((b: MailboxOutcome) => !b.available);
+  if (dead.length === result.boxes.length) result.available = false;
 
   return result;
 }

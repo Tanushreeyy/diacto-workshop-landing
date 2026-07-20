@@ -11,12 +11,68 @@ function opt(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
 }
 
+/** One Microsoft 365 app registration. */
+export interface GraphCreds {
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+}
+
+/** A mailbox, and the app registration that can read it. */
+export interface Mailbox extends GraphCreds {
+  upn: string;
+}
+
 export const env = {
   // Microsoft 365 / Graph
   azureTenantId: () => req("AZURE_TENANT_ID"),
   azureClientId: () => req("AZURE_CLIENT_ID"),
   azureClientSecret: () => req("AZURE_CLIENT_SECRET"),
   graphSender: () => opt("GRAPH_SENDER_UPN", "workshop@diacto.com"),
+
+  graphCreds: (): GraphCreds => ({
+    tenantId: req("AZURE_TENANT_ID"),
+    clientId: req("AZURE_CLIENT_ID"),
+    clientSecret: req("AZURE_CLIENT_SECRET"),
+  }),
+
+  /**
+   * Every mailbox whose inbox is watched for replies and unsubscribes.
+   *
+   * The first is the one we also SEND from. A second lives in a DIFFERENT
+   * Microsoft 365 tenant (diactocandidhr.com is not diacto.com — the primary
+   * app registration gets ErrorInvalidUser for it), so it needs its own
+   * registration, its own admin consent, and its own secret. Reading only: the
+   * sender stays GRAPH_SENDER_UPN until someone deliberately moves it.
+   *
+   * All four _2 variables or none. A half-configured second tenant would fail
+   * its token request every tick and read nothing, which looks identical to
+   * "nobody has replied" — the failure mode this whole file exists to prevent.
+   */
+  mailboxes: (): Mailbox[] => {
+    const primary: Mailbox = {
+      upn: opt("GRAPH_SENDER_UPN", "workshop@diacto.com"),
+      tenantId: req("AZURE_TENANT_ID"),
+      clientId: req("AZURE_CLIENT_ID"),
+      clientSecret: req("AZURE_CLIENT_SECRET"),
+    };
+    const extra = {
+      upn: opt("GRAPH_MAILBOX_2"),
+      tenantId: opt("AZURE_TENANT_ID_2"),
+      clientId: opt("AZURE_CLIENT_ID_2"),
+      clientSecret: opt("AZURE_CLIENT_SECRET_2"),
+    };
+    const set = Object.entries(extra).filter(([, v]) => v);
+    if (!set.length) return [primary];
+    if (set.length !== 4) {
+      throw new Error(
+        `Second mailbox is half-configured — set all of GRAPH_MAILBOX_2, ` +
+          `AZURE_TENANT_ID_2, AZURE_CLIENT_ID_2, AZURE_CLIENT_SECRET_2, or none. ` +
+          `Present: ${set.map(([k]) => k).join(", ")}`,
+      );
+    }
+    return [primary, extra as Mailbox];
+  },
 
   // Google Sheets (service account)
   googleSaEmail: () => req("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
