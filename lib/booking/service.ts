@@ -26,11 +26,13 @@ import {
   StatusSource,
   policyFor,
   outranks,
+  WA_LEAD_ALERT_TEMPLATE,
 } from "./config";
 import {
   readSwitches,
   readHeaderBaseline,
   writeHeaderBaseline,
+  readSetting,
   ALL_ON,
   Switches,
 } from "./control";
@@ -73,6 +75,7 @@ const A = {
   company: "company",
   location: "location",
   employeeCount: "employee_count",
+  years: "years_in_business",
   phone: "phone",
   phoneKey: "phone_key",
   email: "email",
@@ -138,6 +141,15 @@ export const FORM = {
     "location",
     "city",
   ],
+  // Added by the unified Saturday Instant Form ("years_in_business?"). Absent from
+  // the older tabs — resolveHeader returns null there and the field stays blank,
+  // which the full ops alert renders as "—".
+  years: [
+    "years_in_business",
+    "how_many_years_in_business",
+    "years_in_operation",
+    "business_age",
+  ],
 };
 
 const isDone = (v: string) => (v || "").trim().toUpperCase() === "TRUE";
@@ -150,6 +162,7 @@ export interface Prefill {
   company: string;
   location: string;
   employeeCount: string;
+  years: string;
   expectations: string;
 }
 
@@ -226,6 +239,7 @@ function rowToPrefill(auto: Table, row: SheetRow): Prefill {
     company: cell(auto, row, A.company),
     location: cell(auto, row, A.location),
     employeeCount: cell(auto, row, A.employeeCount),
+    years: cell(auto, row, A.years),
     expectations: cell(auto, row, A.expectations),
   };
 }
@@ -412,6 +426,7 @@ async function registerLeadLocked(input: RegistrationInput): Promise<RegisterRes
     [A.company, input.company],
     [A.location, input.location],
     [A.employeeCount, input.employeeCount],
+    [A.years, input.years],
   ] as const) {
     if (typed) fields[col] = typed;
   }
@@ -432,7 +447,7 @@ async function registerLeadLocked(input: RegistrationInput): Promise<RegisterRes
   // absent from `input`, and the Event Pass prints the company. Row first, typed on top.
   const was = row
     ? rowToPrefill(auto, row)
-    : { name: "", email: "", phone: "", designation: "", company: "", location: "", employeeCount: "", expectations: "" };
+    : { name: "", email: "", phone: "", designation: "", company: "", location: "", employeeCount: "", years: "", expectations: "" };
   const pick = (typed: string, had: string) => typed || had;
   const lead: Prefill = {
     name: pick(input.name, was.name),
@@ -442,6 +457,7 @@ async function registerLeadLocked(input: RegistrationInput): Promise<RegisterRes
     company: pick(input.company, was.company),
     location: pick(input.location, was.location),
     employeeCount: pick(input.employeeCount, was.employeeCount),
+    years: pick(input.years, was.years),
     expectations: pick(input.expectations, was.expectations),
   };
 
@@ -473,6 +489,7 @@ interface FormLead {
   company: string;
   employeeCount: string;
   location: string;
+  years: string;
 }
 
 async function ingestLead(
@@ -509,6 +526,7 @@ async function ingestLead(
       [A.company]: l.company,
       [A.employeeCount]: l.employeeCount,
       [A.location]: l.location,
+      [A.years]: l.years,
       [A.phone]: e164,
       [A.phoneKey]: key,
       [A.email]: l.email,
@@ -582,6 +600,54 @@ async function ingestLead(
       (sent.length ? ` · sent ${sent.join(" + ")}` : "") +
       (failed.length ? ` · :warning: failed ${failed.join(", ")}` : ""),
   );
+
+  // WhatsApp ops alert — the client wants a WhatsApp ping (not just Slack) on each
+  // instant-form lead. Fire-and-forget and deliberately NOT gated by the client
+  // WhatsApp kill-switch: this is an internal notification, not campaign messaging,
+  // so silencing leads must not silence the team's own heads-up. No-op until a
+  // number is set in the control tab AND the alert template is approved in WATI.
+  await alertOpsNewLead(l, e164).catch((e) =>
+    console.error(`[ingest] ops WhatsApp alert failed for ${l.leadId}:`, e),
+  );
+}
+
+// Ping the ops number(s) in the control tab (`lead_alert_number`, comma/space
+// separated) with the new lead. Uses the safeproof template ({{1}} name · {{2}}
+// phone) by default — both are always present. Never throws: a missing number, a
+// still-pending template or a WATI hiccup must not fail an ingest that already
+// created the row and messaged the lead.
+async function alertOpsNewLead(l: FormLead, e164: string): Promise<void> {
+  const raw = (await readSetting("lead_alert_number")) || "";
+  const numbers = raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+  if (!numbers.length) return;
+  // Meta rejects a template send with an empty (or newline-bearing) body param, so
+  // every value is squashed to a single line and falls back to "—" when the lead
+  // left it blank or the form tab lacks that column (older forms have no years/loc).
+  const v = (x: string) => (x || "").replace(/\s+/g, " ").trim() || "—";
+  // The full template (wa_lead_alert_full) carries all seven instant-form fields;
+  // the 2-field safeproof (wa_lead_alert) only ever needs name + phone. Match the
+  // param count to whichever is configured so we never over/under-fill.
+  const parameters = WA_LEAD_ALERT_TEMPLATE.includes("full")
+    ? [
+        { name: "1", value: v(l.name) },
+        { name: "2", value: v(e164 || l.phone) },
+        { name: "3", value: v(l.email) },
+        { name: "4", value: v(l.location) },
+        { name: "5", value: v(l.designation) },
+        { name: "6", value: v(l.years) },
+        { name: "7", value: v(l.employeeCount) },
+      ]
+    : [
+        { name: "1", value: v(l.name) },
+        { name: "2", value: v(e164 || l.phone) },
+      ];
+  for (const number of numbers) {
+    try {
+      await sendTemplate({ whatsappNumber: number, templateName: WA_LEAD_ALERT_TEMPLATE, parameters });
+    } catch (e) {
+      console.error(`[ingest] ops alert to ${number} failed:`, e);
+    }
+  }
 }
 
 
@@ -979,6 +1045,7 @@ export async function runTick(): Promise<TickSummary> {
     const cCompany = resolveHeader(form, FORM.company);
     const cEmp = resolveHeader(form, FORM.employeeCount);
     const cLoc = resolveHeader(form, FORM.location);
+    const cYears = resolveHeader(form, FORM.years);
     const get = (fr: SheetRow, col: string | null) => (col ? cell(form, fr, col) : "");
 
     for (const fr of form.rows) {
@@ -1028,6 +1095,7 @@ export async function runTick(): Promise<TickSummary> {
             company: get(fr, cCompany),
             employeeCount: get(fr, cEmp),
             location: get(fr, cLoc),
+            years: get(fr, cYears),
           },
           ledger,
           switches,

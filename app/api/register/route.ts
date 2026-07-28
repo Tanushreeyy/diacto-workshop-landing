@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
     company: s("company"),
     location: s("location"),
     employeeCount: s("employeeCount"),
+    years: s("years"),
     phone: s("phone"),
     email: s("email"),
     expectations: s("expectations"),

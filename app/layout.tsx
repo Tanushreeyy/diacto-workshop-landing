@@ -17,9 +17,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Free Founder Workshop | How To Hire, Train & Retain Employees",
+  title: "Business Transformation Blueprint™ — FREE Workshop for Founders | 10X Growth in 1 Year | Sat 1 Aug, Baner, Pune",
   description:
-    "A FREE practical workshop for founders and business owners of Private Limited & Limited companies. Learn proven systems to hire the right people, train them fast, and retain your best talent. Prabhavee Tech Park, Baner, Pune.",
+    "Business Transformation Blueprint™ — a FREE practical workshop for founders & entrepreneurs. Achieve 10X business growth in just 1 year. Saturday, 1st August, 3–6 PM, Baner, Pune. Limited seats.",
 };
 
 export const viewport: Viewport = {

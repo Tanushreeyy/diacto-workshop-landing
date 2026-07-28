@@ -46,7 +46,7 @@ function page(opts: {
 <div style="max-width:520px;margin:8vh auto;padding:0 20px;">
   <div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 14px rgba(11,30,51,.1);">
     <div style="background:${NAVY};padding:22px 28px;">
-      <p style="margin:0;letter-spacing:2px;font-size:13px;color:${GOLD};font-weight:bold;">HIGH-PERFORMANCE TEAMS WORKSHOP</p>
+      <p style="margin:0;letter-spacing:2px;font-size:13px;color:${GOLD};font-weight:bold;">BUSINESS TRANSFORMATION BLUEPRINT</p>
     </div>
     <div style="padding:30px 28px;">
       <h1 style="margin:0 0 12px;font-size:21px;color:${NAVY};">${escapeHtml(opts.heading)}</h1>

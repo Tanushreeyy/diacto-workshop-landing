@@ -4,9 +4,9 @@
 import { WORKSHOP } from "./booking/config";
 
 export const EVENT = {
-  title: "How To Hire, Train & Retain Employees",
+  title: "Business Transformation Blueprint",
   subtitle:
-    "FREE Practical Workshop for Founders & Business Owners of Private Limited & Limited Companies",
+    "FREE Practical Workshop for Founders & Business Owners — Achieve 10X Business Growth in Just 1 Year",
   venue: WORKSHOP.venue,
   timeLabel: "3:00 PM – 6:00 PM",
   // Was "This Friday" — ambiguous once the event is more than a week out (this

@@ -10,29 +10,44 @@ type Learning = {
 
 const LEARNINGS: Learning[] = [
   {
-    title: "Hire Right",
-    description: "How to identify A-Players before hiring.",
-    icon: <HireIcon />,
+    title: "The Growth Mindset",
+    description: "Think 10X, not 10% — the founder mindset shift.",
+    icon: <MindsetIcon />,
   },
   {
-    title: "Train Right",
-    description: "Build productive employees within weeks.",
+    title: "The 3Ps of Growth",
+    description: "People, Process & Product — the growth engine.",
     icon: <TrainIcon />,
   },
   {
-    title: "Retain Right",
-    description: "Keep your best people engaged.",
+    title: "The 8 Pillars",
+    description: "The framework for a scalable business.",
+    icon: <SystemsIcon />,
+  },
+  {
+    title: "High-Performance Teams",
+    description: "Build a team that owns outcomes, not tasks.",
+    icon: <HireIcon />,
+  },
+  {
+    title: "Hire, Train & Retain",
+    description: "Attract and keep the right A-players.",
     icon: <RetainIcon />,
   },
   {
-    title: "Fire Right",
-    description: "Handle poor performers professionally and legally.",
+    title: "Exit the Right Way",
+    description: "Let go of wrong-fit employees professionally.",
     icon: <FireIcon />,
   },
   {
-    title: "Build Systems",
-    description: "Reduce founder dependency.",
-    icon: <SystemsIcon />,
+    title: "Founder Freedom",
+    description: "Reduce founder dependency — a business that runs without you.",
+    icon: <OpenLockIcon />,
+  },
+  {
+    title: "Next-Gen Strategies",
+    description: "Modern playbooks for the next decade of growth.",
+    icon: <CompassIcon />,
   },
 ];
 
@@ -44,16 +59,12 @@ export default function Learnings() {
           <SectionHeading overline="THE FRAMEWORK" title="What You'll Learn" />
         </Reveal>
 
-        <div className="mx-auto mt-14 grid max-w-5xl grid-cols-1 gap-x-8 gap-y-12 md:grid-cols-2 lg:grid-cols-6">
+        <div className="mx-auto mt-14 grid max-w-5xl grid-cols-1 gap-x-8 gap-y-12 sm:grid-cols-2 lg:grid-cols-4">
           {LEARNINGS.map((item, i) => (
             <Reveal
               key={item.title}
-              delay={i * 100}
-              className={
-                "flex flex-col items-center text-center lg:col-span-2" +
-                // Center the trailing two items beneath the first three.
-                (i === 3 ? " lg:col-start-2" : "")
-              }
+              delay={i * 80}
+              className="flex flex-col items-center text-center"
             >
               <span
                 className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-gold/10"
@@ -140,6 +151,38 @@ function SystemsIcon() {
       <rect x="4" y="14" width="6" height="6" rx="1.5" />
       <rect x="14" y="14" width="6" height="6" rx="1.5" />
       <path d="M10 7h4M7 10v4M17 10v4M10 17h4" />
+    </svg>
+  );
+}
+
+/* Growth Mindset — lightbulb. */
+function MindsetIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M9 18h6" />
+      <path d="M10 21h4" />
+      <path d="M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.9v.2h5v-.2c0-.8.4-1.5 1-1.9A6 6 0 0 0 12 3Z" />
+    </svg>
+  );
+}
+
+/* Founder Freedom — open padlock (reduced dependency). */
+function OpenLockIcon() {
+  return (
+    <svg {...iconProps}>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 7.7-1.5" />
+      <path d="M12 15v2" />
+    </svg>
+  );
+}
+
+/* Next-Gen Strategies — compass / navigation. */
+function CompassIcon() {
+  return (
+    <svg {...iconProps}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m15.5 8.5-2 5-5 2 2-5 5-2Z" />
     </svg>
   );
 }

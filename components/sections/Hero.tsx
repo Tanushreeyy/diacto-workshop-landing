@@ -4,10 +4,10 @@ import EventChips from "@/components/ui/EventChips";
 import { EVENT } from "@/lib/event";
 
 const LEARNINGS = [
-  "Hire the Right Employees",
-  "Train for Faster Productivity",
-  "Retain Top Performers",
-  "Fire Wrong Employees Professionally",
+  "Great Teams",
+  "Great Products",
+  "Great Processes",
+  "Great Businesses",
 ];
 
 export default function Hero() {
@@ -44,7 +44,7 @@ export default function Hero() {
           {/* Overline */}
           <Reveal className="text-center lg:col-start-1 lg:row-start-1 lg:text-left">
             <p className="font-sans text-sm font-semibold uppercase tracking-[0.25em] text-brand-gold">
-              FREE FOUNDER SEMINAR
+              FREE PRACTICAL WORKSHOP
             </p>
           </Reveal>
 
@@ -57,11 +57,10 @@ export default function Hero() {
               id="hero-heading"
               className="font-serif text-3xl font-bold leading-[1.1] text-brand-white md:text-4xl lg:text-5xl"
             >
-              Stop Hiring Employees.
+              Achieve <span className="text-brand-gold">10X</span> Business
+              Growth
               <br />
-              Start Building
-              <br />
-              <span className="text-brand-gold">High-Performance Teams.</span>
+              in Just 1 Year.
             </h1>
           </Reveal>
 
@@ -71,8 +70,8 @@ export default function Hero() {
             className="text-center lg:col-start-1 lg:row-start-3 lg:text-left"
           >
             <p className="font-sans text-lg leading-relaxed text-white/70">
-              FREE Practical Workshop for Founders &amp; Business Owners of
-              Private Limited &amp; Limited Companies
+              Build Great Businesses. Create Lasting Impact. A free, practical
+              workshop for founders &amp; entrepreneurs.
             </p>
           </Reveal>
 

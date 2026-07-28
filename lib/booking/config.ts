@@ -6,21 +6,21 @@ const opt = (k: string, d: string) => process.env[k] || d;
 
 export const WORKSHOP = {
   regIdPrefix: opt("REG_ID_PREFIX", "HPT"), // High-Performance Teams
-  eventMMDD: opt("EVENT_MMDD", "0724"), // used in the Registration ID (HPT-0724-####)
-  dateLabel: opt("EVENT_DATE_LABEL", "Friday, 24 July 2026"),
+  eventMMDD: opt("EVENT_MMDD", "0801"), // used in the Registration ID (HPT-0801-####)
+  dateLabel: opt("EVENT_DATE_LABEL", "Saturday, 1 August 2026"),
   // Short label used both in the UI chip and as the WhatsApp date variable, so the
   // date is one env var everywhere — change it here (or via EVENT_DATE_SHORT) and
   // every message + the landing page move together, no template rebuild required.
-  dateShort: opt("EVENT_DATE_SHORT", "Fri, 24 July"),
+  dateShort: opt("EVENT_DATE_SHORT", "Sat, 1 August"),
   timeLabel: opt("EVENT_TIME_LABEL", "3:00 PM – 6:00 PM  (Check-in from 2:30 PM)"),
-  venue: opt("EVENT_VENUE", "Prabhavee Tech Park, Baner, Pune"),
+  venue: opt("EVENT_VENUE", "901, B Wing, Prabhavee Tech Park, Baner, Pune"),
   mapUrl: opt("EVENT_MAP_URL", "https://maps.app.goo.gl/MtpixrnbfgNFHYku5?g_st=iw"),
   supportNumber: opt("SUPPORT_NUMBER", "+91 7387731069"),
   website: opt("BRAND_WEBSITE", "www.diacto.com"),
   fromName: opt("BRAND_FROM_NAME", "Team Diacto Technologies"),
   unsubscribeEmail: opt("UNSUBSCRIBE_EMAIL", "workshop@diacto.com"),
-  // The single source of truth for scheduling. Fri 24 Jul 2026 15:00 IST.
-  eventStartUtc: opt("EVENT_START_UTC", "2026-07-24T09:30:00Z"),
+  // The single source of truth for scheduling. Sat 1 Aug 2026 15:00 IST.
+  eventStartUtc: opt("EVENT_START_UTC", "2026-08-01T09:30:00Z"),
 } as const;
 
 // WATI template names — must match the templates approved in the WATI dashboard.
@@ -44,6 +44,14 @@ export const WA_TEMPLATES = {
   WA7: opt("WATI_TPL_WA7", "wa_7_morning_of"),
   WA8: opt("WATI_TPL_WA8", "wa_two_hour"),
 } as const;
+
+// Internal ops alert. A WhatsApp template pinged to the ops number(s) in the
+// control tab (`lead_alert_number`, comma-separated) each time a new instant-form
+// lead lands — the WhatsApp counterpart of the existing Slack "New lead" ping.
+// Defaults to the 2-variable "safeproof" template ({{1}} name · {{2}} phone) —
+// both fields are always present, so it works before the 7-field `wa_lead_alert_full`
+// is approved and before the new form's extra fields (years in business, etc.) exist.
+export const WA_LEAD_ALERT_TEMPLATE = opt("WATI_TPL_LEAD_ALERT", "wa_lead_alert");
 
 // Nurture ladder for leads who haven't finished registering:
 // WA-2 (touch 1) → WA-3 (touch 2) → WA-4 (repeats twice daily until registered).

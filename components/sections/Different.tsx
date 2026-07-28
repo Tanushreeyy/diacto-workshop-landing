@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import SectionHeading from "@/components/ui/SectionHeading";
 import Reveal from "@/components/ui/Reveal";
 
-const STEPS = ["Hire", "Train", "Manage", "Retain", "Fire", "Scale"];
+const STEPS = ["Teams", "Products", "Processes", "Growth", "Systems", "Scale"];
 
 export default function Different() {
   return (
@@ -19,15 +19,15 @@ export default function Different() {
         <Reveal delay={100}>
           <p className="mx-auto mt-6 max-w-2xl text-center font-sans text-lg leading-relaxed">
             <span className="block text-brand-grey">
-              Most workshops teach HR.
+              Most workshops teach theory.
             </span>
             <span className="mt-1 block font-semibold text-brand-charcoal">
-              We teach Business Growth through Better People.
+              We give you the complete blueprint — People, Process, Product.
             </span>
           </p>
         </Reveal>
 
-        {/* Flow: Hire → Train → Manage → Retain → Fire → Scale
+        {/* Flow: Teams → Products → Processes → Growth → Systems → Scale
             Vertical on mobile, horizontal from md up. */}
         <Reveal delay={200}>
           <div className="mt-14 flex flex-col items-center justify-center gap-3 md:flex-row md:flex-wrap md:gap-2 lg:gap-3">

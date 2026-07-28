@@ -7,9 +7,6 @@ const FOR = [
   "CEOs",
   "Managing Directors",
   "Business Owners",
-  "Companies with 20–500 Employees",
-  "Private Limited Companies",
-  "Limited Companies",
 ];
 
 const NOT_FOR = [

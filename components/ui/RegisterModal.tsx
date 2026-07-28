@@ -14,6 +14,7 @@ interface Props {
 // places, and two vocabularies for one field make the sheet unsortable.
 const DESIGNATIONS = ["Founder/Director/CEO", "Co-Founder/COO/CFO", "Others"];
 const EMPLOYEE_COUNTS = ["1-20", "21-50", "51-200", "201 & Above"];
+const YEARS_IN_BUSINESS = ["Less than 1 year", "1-3 years", "3-5 years", "5-10 years", "10+ years"];
 
 interface Fields {
   name: string;
@@ -21,6 +22,7 @@ interface Fields {
   company: string;
   employeeCount: string;
   location: string;
+  years: string;
   phone: string;
   email: string;
   expectations: string;
@@ -31,6 +33,7 @@ const EMPTY: Fields = {
   company: "",
   employeeCount: "",
   location: "",
+  years: "",
   phone: "",
   email: "",
   expectations: "",
@@ -40,8 +43,8 @@ const EMPTY: Fields = {
 // when we don't already have them. That is decided PER FIELD, not per lead:
 // leads captured by the older form are "known" yet have no designation/company,
 // and hiding the fields for them would drop the answers on the floor.
-type Qualifier = "designation" | "company" | "employeeCount" | "location";
-const QUALIFIERS: Qualifier[] = ["designation", "company", "employeeCount", "location"];
+type Qualifier = "designation" | "company" | "employeeCount" | "location" | "years";
+const QUALIFIERS: Qualifier[] = ["designation", "company", "employeeCount", "location", "years"];
 
 type Step = "loading" | "phone" | "form" | "already" | "success";
 
@@ -72,6 +75,7 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
     company: false,
     employeeCount: false,
     location: false,
+    years: false,
   });
   const [already, setAlready] = useState<{ regId: string; passUrl?: string } | null>(null);
   const [success, setSuccess] = useState<{ name: string; regId: string; passUrl?: string } | null>(null);
@@ -104,6 +108,7 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
       company: p.company || "",
       employeeCount: p.employeeCount || "",
       location: p.location || "",
+      years: p.years || "",
       phone: p.phone || typedPhone || "",
       email: p.email || "",
       expectations: "",
@@ -113,6 +118,7 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
       company: !!p.company,
       employeeCount: !!p.employeeCount,
       location: !!p.location,
+      years: !!p.years,
     });
     setStep("form");
   }, []);
@@ -227,9 +233,9 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
   }
 
   const field =
-    "w-full rounded-lg border border-black/15 bg-white px-3 py-2.5 font-sans text-sm " +
+    "w-full rounded-lg border border-black/15 bg-white px-3 py-2 font-sans text-sm " +
     "text-brand-black outline-none transition focus:border-brand-gold focus:ring-2 focus:ring-brand-gold/30";
-  const label = "mb-1 block font-sans text-xs font-semibold text-brand-charcoal";
+  const label = "mb-0.5 block font-sans text-xs font-semibold text-brand-charcoal";
 
   if (!mounted) return null;
 
@@ -242,7 +248,7 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
       onClick={onClose}
     >
       <div
-        className="my-auto w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl md:p-7"
+        className="my-auto w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl md:p-6"
         onClick={(e) => e.stopPropagation()}
       >
         {step === "loading" && (
@@ -364,63 +370,74 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
 
         {step === "form" && (
           <>
-            <h3 className="font-serif text-2xl font-bold text-brand-black">
+            <h3 className="font-serif text-xl font-bold text-brand-black">
               {known ? `Almost done${f.name ? `, ${f.name.split(" ")[0]}` : ""}!` : "Reserve your free seat"}
             </h3>
-            <p className="mt-1 font-sans text-sm text-brand-charcoal/70">
+            <p className="mt-0.5 font-sans text-xs text-brand-charcoal/70">
               {known
                 ? "We've filled in what we know — just confirm and add a few details."
                 : "Your Event Pass will be sent to your WhatsApp & email instantly."}
             </p>
 
-            <form onSubmit={submitForm} className="mt-5 space-y-3.5">
-              <div>
-                <label className={label} htmlFor="r-name">Your Name *</label>
-                <input id="r-name" ref={firstRef} className={field} value={f.name} onChange={set("name")} />
-              </div>
+            <form onSubmit={submitForm} className="mt-3 space-y-3">
+              <div className="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className={label} htmlFor="r-name">Your Name *</label>
+                  <input id="r-name" ref={firstRef} className={field} value={f.name} onChange={set("name")} />
+                </div>
 
-              {!have.designation && (
-                <div>
-                  <label className={label} htmlFor="r-desig">Your Designation *</label>
-                  <Select
-                    id="r-desig"
-                    value={f.designation}
-                    onChange={(v) => setF((p) => ({ ...p, designation: v }))}
-                    options={DESIGNATIONS}
-                  />
-                </div>
-              )}
-              {!have.company && (
-                <div>
-                  <label className={label} htmlFor="r-org">Company Name *</label>
-                  <input id="r-org" className={field} value={f.company} onChange={set("company")} />
-                </div>
-              )}
-              {!have.employeeCount && (
-                <div>
-                  <label className={label} htmlFor="r-emp">No. of Employees *</label>
-                  <Select
-                    id="r-emp"
-                    value={f.employeeCount}
-                    onChange={(v) => setF((p) => ({ ...p, employeeCount: v }))}
-                    options={EMPLOYEE_COUNTS}
-                  />
-                </div>
-              )}
-              {!have.location && (
-                <div>
-                  <label className={label} htmlFor="r-loc">Organization Location *</label>
-                  <input
-                    id="r-loc"
-                    className={field}
-                    placeholder="City"
-                    value={f.location}
-                    onChange={set("location")}
-                  />
-                </div>
-              )}
+                {!have.designation && (
+                  <div>
+                    <label className={label} htmlFor="r-desig">Your Designation *</label>
+                    <Select
+                      id="r-desig"
+                      value={f.designation}
+                      onChange={(v) => setF((p) => ({ ...p, designation: v }))}
+                      options={DESIGNATIONS}
+                    />
+                  </div>
+                )}
+                {!have.company && (
+                  <div>
+                    <label className={label} htmlFor="r-org">Company Name *</label>
+                    <input id="r-org" className={field} value={f.company} onChange={set("company")} />
+                  </div>
+                )}
+                {!have.employeeCount && (
+                  <div>
+                    <label className={label} htmlFor="r-emp">No. of Employees *</label>
+                    <Select
+                      id="r-emp"
+                      value={f.employeeCount}
+                      onChange={(v) => setF((p) => ({ ...p, employeeCount: v }))}
+                      options={EMPLOYEE_COUNTS}
+                    />
+                  </div>
+                )}
+                {!have.location && (
+                  <div>
+                    <label className={label} htmlFor="r-loc">Organization Location *</label>
+                    <input
+                      id="r-loc"
+                      className={field}
+                      placeholder="City"
+                      value={f.location}
+                      onChange={set("location")}
+                    />
+                  </div>
+                )}
+                {!have.years && (
+                  <div>
+                    <label className={label} htmlFor="r-years">Years in Business *</label>
+                    <Select
+                      id="r-years"
+                      value={f.years}
+                      onChange={(v) => setF((p) => ({ ...p, years: v }))}
+                      options={YEARS_IN_BUSINESS}
+                    />
+                  </div>
+                )}
 
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                 <div>
                   <label className={label} htmlFor="r-phone">Phone (WhatsApp) *</label>
                   <input id="r-phone" type="tel" inputMode="tel" className={field} value={f.phone} onChange={set("phone")} />
@@ -429,26 +446,26 @@ export default function RegisterModal({ rid, onClose, onRegistered }: Props) {
                   <label className={label} htmlFor="r-email">Email *</label>
                   <input id="r-email" type="email" className={field} value={f.email} onChange={set("email")} />
                 </div>
-              </div>
 
-              <div>
-                <label className={label} htmlFor="r-exp">
-                  What are your expectations from this Workshop?{" "}
-                  <span className="font-normal text-brand-charcoal/50">(optional)</span>
-                </label>
-                <textarea
-                  id="r-exp"
-                  rows={3}
-                  className={`${field} resize-y`}
-                  placeholder="What would make this workshop worth your afternoon?"
-                  value={f.expectations}
-                  onChange={set("expectations")}
-                />
+                <div className="sm:col-span-2">
+                  <label className={label} htmlFor="r-exp">
+                    What are your expectations from this Workshop?{" "}
+                    <span className="font-normal text-brand-charcoal/50">(optional)</span>
+                  </label>
+                  <textarea
+                    id="r-exp"
+                    rows={2}
+                    className={`${field} resize-y`}
+                    placeholder="What would make this workshop worth your afternoon?"
+                    value={f.expectations}
+                    onChange={set("expectations")}
+                  />
+                </div>
               </div>
 
               {err && <p className="font-sans text-sm text-red-600">{err}</p>}
 
-              <div className="flex gap-2 pt-1.5">
+              <div className="flex gap-2 pt-0.5">
                 <button
                   type="submit"
                   disabled={loading}

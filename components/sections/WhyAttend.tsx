@@ -1,11 +1,10 @@
 import Reveal from "@/components/ui/Reveal";
 
 const DELIVERABLES = [
-  "Ready-to-use Hiring Framework",
-  "Interview Scorecards",
-  "Performance Management System",
-  "Employee Retention Framework",
-  "High Performance Team Blueprint",
+  "Learn from Industry Experts",
+  "Practical Insights. Proven Frameworks.",
+  "Actionable Strategies. Real Results.",
+  "Scale Faster. Succeed Longer.",
 ];
 
 export default function WhyAttend() {
@@ -30,9 +29,9 @@ export default function WhyAttend() {
 
         <Reveal delay={100}>
           <p className="mx-auto mt-6 max-w-2xl font-sans text-lg leading-relaxed text-white/80">
-            Instead of HR theory…
+            Instead of theory…
             <br />
-            You&apos;ll learn practical systems you can implement immediately.
+            You&apos;ll get practical frameworks you can implement immediately.
           </p>
         </Reveal>
 
@@ -48,6 +47,12 @@ export default function WhyAttend() {
               </li>
             ))}
           </ul>
+        </Reveal>
+
+        <Reveal delay={300}>
+          <p className="mx-auto mt-10 font-serif text-xl font-semibold text-brand-gold md:text-2xl">
+            100% FREE. No Fees. Just Value.
+          </p>
         </Reveal>
       </div>
     </section>

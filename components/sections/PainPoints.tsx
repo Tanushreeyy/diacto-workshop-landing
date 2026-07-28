@@ -8,14 +8,14 @@ type PainPoint = { text: string; icon: ReactNode };
 const PAIN_POINTS: PainPoint[] = [
   { text: "Employees leave within months", icon: <ExitDoorIcon /> },
   { text: "Wrong hiring decisions", icon: <UserXIcon /> },
-  { text: "Productivity is low", icon: <TrendingDownIcon /> },
-  { text: "No accountability", icon: <ClipboardQuestionIcon /> },
-  { text: "Founder manages everything", icon: <RadiatingIcon /> },
+  { text: "Business growing slower than it should", icon: <TrendingDownIcon /> },
+  { text: "Low productivity, no accountability", icon: <ClipboardQuestionIcon /> },
+  { text: "Founder involved in every decision", icon: <RadiatingIcon /> },
   {
-    text: "Business isn't growing despite hiring more people",
+    text: "Growth stuck despite adding people",
     icon: <FlatChartIcon />,
   },
-  { text: "High recruitment costs", icon: <RupeeUpIcon /> },
+  { text: "No systems — everything depends on you", icon: <RupeeUpIcon /> },
   { text: "Team lacks ownership", icon: <ScatteredPeopleIcon /> },
 ];
 
