@@ -17,23 +17,39 @@ export default function EventChips({
   const chips = [
     { icon: CalendarIcon, label: EVENT.dayLabel },
     { icon: ClockIcon, label: EVENT.timeLabel },
-    { icon: PinIcon, label: EVENT.venue },
+    // The venue chip links to Google Maps so a lead can open directions in one tap.
+    { icon: PinIcon, label: EVENT.venue, href: EVENT.mapUrl },
   ];
 
   const justify =
     align === "left" ? "justify-center lg:justify-start" : "justify-center";
 
+  const chipClass =
+    "inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 font-sans text-sm text-white/90";
+
   return (
     <ul
       className={`flex flex-wrap items-center gap-3 ${justify} ${className}`.trim()}
     >
-      {chips.map(({ icon: Icon, label }) => (
-        <li
-          key={label}
-          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 font-sans text-sm text-white/90"
-        >
-          <Icon />
-          <span>{label}</span>
+      {chips.map(({ icon: Icon, label, href }) => (
+        <li key={label} className="inline-flex">
+          {href ? (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Open ${label} in Google Maps`}
+              className={`${chipClass} underline decoration-brand-gold/40 underline-offset-4 transition hover:border-brand-gold/40 hover:bg-white/10`}
+            >
+              <Icon />
+              <span>{label}</span>
+            </a>
+          ) : (
+            <span className={chipClass}>
+              <Icon />
+              <span>{label}</span>
+            </span>
+          )}
         </li>
       ))}
     </ul>

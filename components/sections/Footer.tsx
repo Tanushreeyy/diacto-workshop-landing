@@ -20,7 +20,16 @@ export default function Footer() {
         </p>
 
         <p className="font-sans text-xs text-white/60">
-          {EVENT.dayLabel} · {EVENT.timeLabel} · {EVENT.venue}
+          {EVENT.dayLabel} · {EVENT.timeLabel} ·{" "}
+          <a
+            href={EVENT.mapUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${EVENT.venue} in Google Maps`}
+            className="underline decoration-brand-gold/40 underline-offset-2 transition hover:text-white/90"
+          >
+            {EVENT.venue}
+          </a>
         </p>
 
         <p className="mt-1 font-sans text-xs text-white/40">

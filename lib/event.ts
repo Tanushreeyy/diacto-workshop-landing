@@ -8,6 +8,7 @@ export const EVENT = {
   subtitle:
     "FREE Practical Workshop for Founders & Business Owners — Achieve 10X Business Growth in Just 1 Year",
   venue: WORKSHOP.venue,
+  mapUrl: WORKSHOP.mapUrl,
   timeLabel: "3:00 PM – 6:00 PM",
   // Was "This Friday" — ambiguous once the event is more than a week out (this
   // Friday is the 17th; the workshop is the 24th). Now it shows the explicit date,
