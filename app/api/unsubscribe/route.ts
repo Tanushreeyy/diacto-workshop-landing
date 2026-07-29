@@ -7,6 +7,7 @@ import {
   optOutStateForToken,
 } from "@/lib/booking/service";
 import { STATUS, STATUS_SOURCE } from "@/lib/booking/config";
+import { loadTabOverrides } from "@/lib/booking/control";
 import { notifySlack } from "@/lib/booking/slack";
 
 export const runtime = "nodejs";
@@ -83,6 +84,7 @@ export async function GET(req: NextRequest) {
   // shown the "Unsubscribe?" button again as though nothing had happened.
   let state: { found: boolean; name?: string; status?: string };
   try {
+    await loadTabOverrides();
     const auto = await readTable(env.autoTab());
     state = optOutStateForToken(auto, rid);
   } catch {

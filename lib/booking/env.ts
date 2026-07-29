@@ -11,6 +11,8 @@ function opt(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
 }
 
+import { tabOverride } from "./tabOverrides";
+
 /** One Microsoft 365 app registration. */
 export interface GraphCreds {
   tenantId: string;
@@ -116,19 +118,27 @@ export const env = {
   // it is better to refuse to start. These getters are lazy, so a missing
   // variable throws inside the tick, which catches it, sends nothing and reports
   // the error — and /api/health names the missing variable outright.
+  // ── Overridable from the control tab (see tabOverrides.ts / loadTabOverrides).
+  // A control-tab row (form_tab / automation_tab / calling_tab) wins so the
+  // campaign can be repointed WITHOUT a redeploy; a blank/absent row leaves the
+  // env var authoritative. The override is only honoured once loadTabOverrides()
+  // has run for this entry point — every public entry point awaits it first.
   formTabs: () =>
-    req("SHEET_FORM_TAB")
+    (tabOverride("form_tab") || req("SHEET_FORM_TAB"))
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean),
-  autoTab: () => req("SHEET_AUTOMATION_TAB"),
+  autoTab: () => tabOverride("automation_tab") || req("SHEET_AUTOMATION_TAB"),
   // Kill switches live in the sheet so pausing never needs a deploy. A missing
   // TAB still means "everything enabled" (control.ts fails open by design); a
-  // missing VARIABLE is a misconfiguration and is refused here.
+  // missing VARIABLE is a misconfiguration and is refused here. Deliberately NOT
+  // overridable from the control tab — it is how the control tab is located.
   controlTab: () => req("SHEET_CONTROL_TAB"),
-  // The calling team's own tab, read-only. Optional: an environment without one
-  // (staging) simply skips the sync rather than failing.
-  callingTab: () => opt("SHEET_CALLING_TAB", ""),
+  // A dedicated calling tab (legacy Status/Sub Status schema), read-only and
+  // optional — for this campaign dispositions arrive via the form tab's Remark
+  // column instead (see syncFormRemarks). Point `calling_tab` in the control tab
+  // (or SHEET_CALLING_TAB) at a real tab to also sync one.
+  callingTab: () => tabOverride("calling_tab") || opt("SHEET_CALLING_TAB", ""),
 
   // WhatsApp (WATI)
   watiEndpoint: () => req("WATI_API_ENDPOINT").replace(/\/+$/, ""),

@@ -24,7 +24,7 @@
 
 import { readTable, resolveHeader, cell } from "./google";
 import { setOptOut } from "./service";
-import { normalizeStatus, outranks, STATUS_SOURCE, LeadStatus } from "./config";
+import { normalizeStatus, remarkToStatus, outranks, STATUS_SOURCE, LeadStatus } from "./config";
 import { env } from "./env";
 
 // Call outcomes, not lead states. "Connected" says someone picked up the phone;
@@ -119,6 +119,78 @@ export async function syncCallingDispositions(
       STATUS_SOURCE.caller,
     );
     if (out.found && !out.alreadyOut) result.applied++;
+  }
+
+  return result;
+}
+
+// The calling team's dispositions for the Saturday campaign live in the FORM tab
+// itself — a `Remark` column they fill in alongside Meta's own columns — not in a
+// separate Calling Sheet. This reads that column and applies it, one-way and
+// read-only exactly like syncCallingDispositions, but through remarkToStatus:
+// only "Junk"/"Not Interested"/"Confirmed" do anything, and — crucially — an
+// unrecognised remark is a NO-OP, never a stop. (config.ts explains why the
+// default-to-stop rule that is right for a dedicated calling tab is wrong here.)
+//
+// Matches on the form's `id` == the automation tab's lead_id, which ingest copies
+// verbatim (FORM.id → A.leadId). Phone/email are deliberately not fallbacks — a
+// shared mailbox or mistyped number would silence the wrong person.
+export async function syncFormRemarks(): Promise<CallingSyncResult> {
+  const result: CallingSyncResult = {
+    available: true,
+    scanned: 0,
+    matched: 0,
+    applied: 0,
+    skipped: 0,
+    unmatched: 0,
+  };
+
+  const auto = await readTable(env.autoTab());
+  const byId = new Map(
+    auto.rows.map((r) => [cell(auto, r, "lead_id"), r] as const),
+  );
+
+  for (const tabName of env.formTabs()) {
+    let form;
+    try {
+      form = await readTable(tabName);
+    } catch {
+      continue; // a form tab that isn't connected yet is a normal state (as in ingest)
+    }
+    const cId = resolveHeader(form, ["id", "lead_id"]);
+    const cRemark = resolveHeader(form, ["remark", "remarks"]);
+    if (!cId || !cRemark) continue; // this form tab has no disposition column — skip
+
+    for (const row of form.rows) {
+      const id = cell(form, row, cId).trim();
+      if (!id) continue;
+
+      const target = remarkToStatus(cell(form, row, cRemark));
+      if (!target) continue; // blank / "keep going" remark — leave the lead active
+      result.scanned++;
+
+      const autoRow = byId.get(id);
+      if (!autoRow) {
+        result.unmatched++;
+        continue;
+      }
+      result.matched++;
+
+      // Only ever strengthen (registered is the lowest rank, so it can only land
+      // on a still-active row and can never soften a real stop).
+      const current = cell(auto, autoRow, "status");
+      if (!outranks(target, current)) {
+        result.skipped++;
+        continue;
+      }
+
+      const out = await setOptOut(
+        { token: cell(auto, autoRow, "confirm_token") },
+        target,
+        STATUS_SOURCE.caller,
+      );
+      if (out.found && !out.alreadyOut) result.applied++;
+    }
   }
 
   return result;

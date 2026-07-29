@@ -3,7 +3,7 @@ import { env } from "@/lib/booking/env";
 import { readTable, resolveHeader } from "@/lib/booking/google";
 import { FORM } from "@/lib/booking/service";
 import { WORKSHOP, WA_TEMPLATES, REMINDERS } from "@/lib/booking/config";
-import { readSwitches } from "@/lib/booking/control";
+import { readSwitches, loadTabOverrides } from "@/lib/booking/control";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -155,6 +155,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
+  // Resolve any control-tab tab-name overrides first, so the checks and the
+  // reported config below reflect the tabs the tick will actually use.
+  await loadTabOverrides(true);
+
   const [checks, switches] = await Promise.all([
     Promise.all([
       checkEnv(),
@@ -177,6 +181,7 @@ export async function GET(req: NextRequest) {
         formTabs: env.formTabs(),
         automationTab: env.autoTab(),
         controlTab: env.controlTab(),
+        callingTab: env.callingTab() || null,
         // The live switch state, so a pause is never a guess. null = couldn't read.
         switches: switches
           ? {

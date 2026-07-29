@@ -191,6 +191,34 @@ export function normalizeStatus(raw: string): LeadStatus | "" {
   return STATUS.not_interested; // unknown but deliberate → stop
 }
 
+// The form tab's `Remark` column is the calling team's disposition for this
+// campaign — but it is NOT a suppression column the way the legacy Calling Sheet
+// was. Most of its values mean KEEP GOING ("DNA" = didn't answer, "Not Confirmed",
+// "Connected"), and only a couple mean stop. So it gets an explicit whitelist
+// instead of normalizeStatus's "unknown → not_interested" default, which here
+// would silence the majority — including the people who confirmed they're coming.
+//
+//   Junk           → junk           (stop everything)
+//   Not Interested → not_interested (stop everything)
+//   Confirmed      → registered     (event-day reminders stay; nudges stop)
+//   anything else  → null           (leave the lead fully active)
+//
+// "Confirmed → registered" only ever applies to a blank-status row: registered is
+// the lowest RANK, so outranks() refuses to let it soften a real reply/stop.
+const REMARK_STATUS: Record<string, LeadStatus> = {
+  "junk": STATUS.junk,
+  "not interested": STATUS.not_interested,
+  "notinterested": STATUS.not_interested,
+  "confirmed": STATUS.registered,
+};
+
+/** Status for a form-tab Remark value, or null to leave the lead active. Unlike
+ *  normalizeStatus, an UNRECOGNISED value is a no-op, never a stop. */
+export function remarkToStatus(raw: string): LeadStatus | null {
+  const t = (raw || "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  return REMARK_STATUS[t] ?? null;
+}
+
 /** What this row is allowed to receive. */
 export function policyFor(raw: string): Policy {
   const s = normalizeStatus(raw);

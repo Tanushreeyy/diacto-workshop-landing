@@ -33,6 +33,7 @@
 // briefly not applying, and one nobody would notice until the event.
 import { readTable, resolveHeader, cell, updateRow, appendRow } from "./google";
 import { env } from "./env";
+import { setTabOverrides, TAB_OVERRIDE_KEYS, TabOverrideKey } from "./tabOverrides";
 
 export interface Switches {
   // WHAT to send
@@ -89,6 +90,52 @@ export async function readSwitches(): Promise<Switches> {
     whatsapp: on("whatsapp_enabled"),
     source: `'${table.tab}' (${map.size} setting(s))`,
   };
+}
+
+// ---- tab-name overrides ----------------------------------------------------
+//
+// The automation / form / calling tab names normally come from env vars, but the
+// campaign sometimes has to be repointed at a different tab WITHOUT a redeploy —
+// the same reason the kill switches live in the sheet. A control-tab row
+// (key = automation_tab | form_tab | calling_tab) wins over the env var; an
+// absent or blank row leaves the env var authoritative.
+//
+// loadTabOverrides() MUST be awaited at the top of every entry point that
+// resolves a tab name (runTick and the service functions it fans out to, plus
+// the API routes). Otherwise one path would read the override tab while another
+// read the env tab — and because the automation tab is WRITTEN, that would split
+// registrations and the tick across two tabs. A short TTL keeps the shared
+// control read to one Sheets call per window rather than one per resolution.
+//
+// Fail-open, exactly like readSwitches: any read error leaves the last-known
+// overrides in place (env vars as the ultimate fallback), so a transient Sheets
+// blip never silently repoints a live campaign.
+let tabOverridesLoadedAt = 0;
+const TAB_OVERRIDES_TTL_MS = 30_000;
+
+export async function loadTabOverrides(force = false): Promise<void> {
+  const now = Date.now();
+  if (!force && now - tabOverridesLoadedAt < TAB_OVERRIDES_TTL_MS) return;
+  let table;
+  try {
+    table = await readTable(env.controlTab());
+  } catch {
+    return; // fail open — keep prior overrides; env vars remain the fallback
+  }
+  const cKey = resolveHeader(table, ["key", "setting", "name"]);
+  const cVal = resolveHeader(table, ["value", "enabled", "state"]);
+  const next: Partial<Record<TabOverrideKey, string>> = {};
+  if (cKey && cVal) {
+    for (const row of table.rows) {
+      const k = cell(table, row, cKey).trim().toLowerCase();
+      if ((TAB_OVERRIDE_KEYS as readonly string[]).includes(k)) {
+        const v = cell(table, row, cVal).trim();
+        if (v) next[k as TabOverrideKey] = v;
+      }
+    }
+  }
+  setTabOverrides(next);
+  tabOverridesLoadedAt = now;
 }
 
 // ---- header baseline -------------------------------------------------------

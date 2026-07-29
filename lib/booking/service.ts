@@ -33,6 +33,7 @@ import {
   readHeaderBaseline,
   writeHeaderBaseline,
   readSetting,
+  loadTabOverrides,
   ALL_ON,
   Switches,
 } from "./control";
@@ -62,7 +63,7 @@ import { dueForNurture, dueReminders, isQuietHours, nowIso } from "./schedule";
 import { phoneKey, toE164, isValidPhone, phoneProblem } from "./phone";
 import { samePerson } from "./names";
 import { pollMailReplies } from "./mailReplies";
-import { syncCallingDispositions } from "./callingSync";
+import { syncCallingDispositions, syncFormRemarks } from "./callingSync";
 import { checkWhatsAppDelivery } from "./delivery";
 
 // ---- automation tab (ours) ----
@@ -257,6 +258,7 @@ export async function lookupLead(q: {
   rid?: string;
   phone?: string;
 }): Promise<LookupResult> {
+  await loadTabOverrides(); // control-tab tab-name overrides, before any tab is resolved
   const auto = await readTable(env.autoTab());
   let row: SheetRow | undefined;
 
@@ -357,6 +359,7 @@ export interface RegisterResult {
 // once and produced two rows for one person. The lock serialises them within our
 // single app process (see lock.ts).
 export async function registerLead(input: RegistrationInput): Promise<RegisterResult> {
+  await loadTabOverrides(); // resolve tab names the same way the tick does — no split-brain
   return withSheetLock("registerLead", () => registerLeadLocked(input));
 }
 
@@ -949,6 +952,10 @@ export async function runTick(): Promise<TickSummary> {
   const budgetMs = env.tickBudgetMs();
   const outOfTime = () => Date.now() - startedAt > budgetMs;
 
+  // Load control-tab tab-name overrides BEFORE resolving any tab name below, so
+  // form/automation/calling all point where the control tab says.
+  await loadTabOverrides();
+
   // One tab per live Instant Form. A tab that doesn't exist yet (the next form's
   // connection hasn't run) resolves to null and is simply skipped.
   const tabs = env.formTabs();
@@ -1123,13 +1130,29 @@ export async function runTick(): Promise<TickSummary> {
     summary.errors.push(`reconcile: ${(e as Error).message}`);
   }
 
+  // 1b1) FORM-TAB DISPOSITIONS — the calling team's `Remark` column, written into
+  // the form tab itself. Junk/Not Interested stop the lead; Confirmed marks them
+  // registered (reminders yes, nudges no); everything else is left active. Runs
+  // before nurture so this morning's disposition lands on this tick, not the next.
+  try {
+    const rem = await syncFormRemarks();
+    summary.callerStops += rem.applied;
+    if (rem.applied) {
+      await notifySlack(
+        `:memo: Applied *${rem.applied}* disposition(s) from the form tab's Remark column.`,
+      );
+    }
+  } catch (e) {
+    summary.errors.push(`form remarks: ${(e as Error).message}`);
+  }
+
   // 1b2) CALLER DISPOSITIONS — what the humans on the phone learned. Runs before
   // nurture so a "Not Interested" recorded this morning stops today's follow-up
   // rather than one tick too late. Never allowed to sink the tick.
   try {
     if (env.callingTab()) {
       const sync = await syncCallingDispositions();
-      summary.callerStops = sync.applied;
+      summary.callerStops += sync.applied;
       // A tab that exists but could not be read is an error, not an absence.
       if (sync.error) summary.errors.push(sync.error);
       if (sync.applied) {
@@ -1275,6 +1298,7 @@ export async function runTick(): Promise<TickSummary> {
 export async function passPdfForToken(
   token: string,
 ): Promise<{ bytes: Uint8Array; filename: string } | null> {
+  await loadTabOverrides();
   const auto = await readTable(env.autoTab());
   const row = auto.rows.find((r) => cell(auto, r, A.token) === token);
   if (!row) return null;
@@ -1303,6 +1327,7 @@ export async function setOptOut(
   source: StatusSource = STATUS_SOURCE.reply,
   replyText?: string,
 ): Promise<OptOutResult> {
+  await loadTabOverrides(); // cheap TTL no-op when called mid-tick; correct when called from a webhook
   return withSheetLock("setOptOut", async () => {
     const auto = await readTable(env.autoTab());
     const em = match.email?.trim().toLowerCase();
@@ -1347,6 +1372,7 @@ export async function setOptOut(
 // resume on the next tick — dueReminders' window means only the ones still ahead
 // of the workshop fire, not a stacked burst of stale ones.
 export async function clearOptOut(token: string): Promise<OptOutResult> {
+  await loadTabOverrides();
   return withSheetLock("clearOptOut", async () => {
     const auto = await readTable(env.autoTab());
     const row = auto.rows.find((r) => cell(auto, r, A.token) === token);
@@ -1378,6 +1404,7 @@ export function optOutStateForToken(auto: Table, token: string): {
 // else the oldest, and marks the rest opted_out=duplicate so the gate skips them.
 // Never deletes — retiring keeps the lead_id in knownIds so nothing re-ingests.
 export async function reconcileDuplicates(): Promise<{ retired: number; groups: number }> {
+  await loadTabOverrides();
   return withSheetLock("reconcileDuplicates", async () => {
     const auto = await readTable(env.autoTab());
 
