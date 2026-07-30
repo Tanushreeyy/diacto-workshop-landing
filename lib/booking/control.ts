@@ -46,6 +46,12 @@ export interface Switches {
   // it by pausing stages would also stop the channel that is working fine.
   email: boolean;
   whatsapp: boolean;
+  // Opt-in WATI delivery/reply polling. OFF by default: it fires up to ~26 WATI
+  // read calls per tick (getContacts + getMessages per contact), which is what
+  // tripped the WATI usage limit (429) during a live blast. Sends do NOT depend
+  // on it — it only reports delivery failures to Slack. Turn on from the control
+  // tab (wa_delivery_check_enabled | TRUE) if that visibility is worth the reads.
+  deliveryCheck: boolean;
   source: string; // where the values came from — surfaced in /api/health
 }
 
@@ -55,10 +61,12 @@ export const ALL_ON: Switches = {
   reminders: true,
   email: true,
   whatsapp: true,
+  deliveryCheck: false, // opt-in — see Switches.deliveryCheck
   source: "default (no control tab)",
 };
 
 const isFalse = (v: string) => ["false", "no", "off", "0"].includes(v.trim().toLowerCase());
+const isTrue = (v: string) => ["true", "yes", "on", "1"].includes(v.trim().toLowerCase());
 
 export async function readSwitches(): Promise<Switches> {
   // Resolved OUTSIDE the try on purpose. A missing control TAB is a normal state
@@ -88,6 +96,8 @@ export async function readSwitches(): Promise<Switches> {
     reminders: on("reminders_enabled"),
     email: on("email_enabled"),
     whatsapp: on("whatsapp_enabled"),
+    // Opposite default to the others: OFF unless explicitly switched on.
+    deliveryCheck: map.has("wa_delivery_check_enabled") && isTrue(map.get("wa_delivery_check_enabled")!),
     source: `'${table.tab}' (${map.size} setting(s))`,
   };
 }

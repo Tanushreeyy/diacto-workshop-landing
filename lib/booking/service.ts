@@ -979,7 +979,7 @@ export async function runTick(): Promise<TickSummary> {
     leads: auto.rows.length,
     switches:
       `ingest=${switches.ingest} nurture=${switches.nurture} reminders=${switches.reminders}` +
-      ` | email=${switches.email} whatsapp=${switches.whatsapp} [${switches.source}]`,
+      ` | email=${switches.email} whatsapp=${switches.whatsapp} deliveryCheck=${switches.deliveryCheck} [${switches.source}]`,
     halted: false,
     throttled: 0,
     deferredIngest: 0,
@@ -1277,14 +1277,20 @@ export async function runTick(): Promise<TickSummary> {
   // delivered forever. Naming those people is the difference between a reminder
   // that quietly did not arrive and one somebody can act on.
   //
+  // OPT-IN (switches.deliveryCheck, default OFF): this polls WATI's read API up
+  // to ~26 times per tick, which is what tripped the WATI usage limit (429)
+  // during a live blast. Skipped unless explicitly enabled from the control tab.
+  //
   // Never allowed to sink the tick — a delivery check that breaks the campaign
   // is worse than one that does not run.
-  try {
-    const d = await checkWhatsAppDelivery(auto);
-    summary.deliveryFailed = d.failed;
-    if (!d.available) summary.errors.push("delivery check: WATI contacts/messages not readable");
-  } catch (e) {
-    summary.errors.push(`delivery check: ${(e as Error).message}`);
+  if (switches.deliveryCheck) {
+    try {
+      const d = await checkWhatsAppDelivery(auto);
+      summary.deliveryFailed = d.failed;
+      if (!d.available) summary.errors.push("delivery check: WATI contacts/messages not readable");
+    } catch (e) {
+      summary.errors.push(`delivery check: ${(e as Error).message}`);
+    }
   }
 
   if (summary.errors.length) {
