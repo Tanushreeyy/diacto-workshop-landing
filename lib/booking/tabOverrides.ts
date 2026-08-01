@@ -16,15 +16,30 @@
 export const TAB_OVERRIDE_KEYS = ["automation_tab", "form_tab", "calling_tab"] as const;
 export type TabOverrideKey = (typeof TAB_OVERRIDE_KEYS)[number];
 
-let overrides: Partial<Record<TabOverrideKey, string>> = {};
+// Parked PER SHEET, not globally.
+//
+// A single bag of overrides is correct only while a process ever serves one
+// campaign. Point a second sheet at the same process and the second load
+// overwrites the first — so campaign A would go on resolving tab names that came
+// out of campaign B's control tab, silently, and the automation tab is WRITTEN.
+// That is how one campaign's registrations end up appended to another's sheet.
+//
+// The sheet id is passed in rather than read, because this module deliberately
+// imports nothing: env.ts imports it, and a dependency-free holder can never form
+// an import cycle. env.ts already knows the sheet id, so it simply says which one
+// it is asking about.
+let overrides = new Map<string, Partial<Record<TabOverrideKey, string>>>();
 
-/** The control-tab override for `key`, or "" when none is set. Synchronous:
- *  returns whatever loadTabOverrides() last parked here. */
-export function tabOverride(key: TabOverrideKey): string {
-  return overrides[key] || "";
+/** The control-tab override for `key` on `sheetId`, or "" when none is set.
+ *  Synchronous: returns whatever loadTabOverrides() last parked for that sheet. */
+export function tabOverride(key: TabOverrideKey, sheetId = "default"): string {
+  return overrides.get(sheetId)?.[key] || "";
 }
 
-/** Replace the parked overrides. Called only by loadTabOverrides() in control.ts. */
-export function setTabOverrides(next: Partial<Record<TabOverrideKey, string>>): void {
-  overrides = next;
+/** Replace the parked overrides for one sheet. Only loadTabOverrides() calls this. */
+export function setTabOverrides(
+  next: Partial<Record<TabOverrideKey, string>>,
+  sheetId = "default",
+): void {
+  overrides.set(sheetId, next);
 }

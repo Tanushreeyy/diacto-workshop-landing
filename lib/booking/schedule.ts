@@ -101,6 +101,12 @@ const REMINDER_GRACE_MS = 3 * 3_600_000;
 // nothing at all fires once the workshop has started.
 export function dueReminders(
   remindersSentCsv: string,
+  // The campaign's own schedule and start, rather than the module constants.
+  // REMINDERS was computed once at import from WORKSHOP.eventStartUtc, so every
+  // campaign in a process shared one timetable — fine while there was only ever
+  // one, and silently wrong the moment a second sheet is pointed at.
+  reminders: ReminderSpec[] = REMINDERS,
+  startMs: number = Date.parse(WORKSHOP.eventStartUtc),
   now: Date = new Date(),
 ): ReminderSpec[] {
   const sent = new Set(
@@ -110,8 +116,7 @@ export function dueReminders(
       .filter(Boolean),
   );
   const nowMs = now.getTime();
-  const startMs = Date.parse(WORKSHOP.eventStartUtc);
-  return REMINDERS.filter((r) => {
+  return reminders.filter((r) => {
     if (sent.has(r.key)) return false;
     const atMs = Date.parse(r.at);
     if (nowMs < atMs) return false; // not yet

@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/booking/env";
 import { readTable, resolveHeader } from "@/lib/booking/google";
 import { FORM } from "@/lib/booking/service";
-import { WORKSHOP, WA_TEMPLATES, REMINDERS } from "@/lib/booking/config";
+import { WA_TEMPLATES } from "@/lib/booking/config";
 import { readSwitches, loadTabOverrides } from "@/lib/booking/control";
+import { loadCampaign, campaignProblems, hasEnded } from "@/lib/booking/campaign";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -147,6 +148,29 @@ async function checkSlack(): Promise<Check> {
   return { name: "slack", ok: url.startsWith("https://hooks.slack.com/"), detail: "webhook configured" };
 }
 
+// Is the campaign we are about to run for actually describable?
+//
+// Fails the whole health check, because every other check can pass while the
+// campaign config is wrong — and a healthy-looking deployment messaging people
+// about the wrong workshop is the failure this whole file exists to surface.
+async function checkCampaign(): Promise<Check> {
+  try {
+    const c = await loadCampaign();
+    const problems = campaignProblems(c);
+    if (problems.length) {
+      return { name: "campaign", ok: false, detail: problems.join(" · ").slice(0, 300) };
+    }
+    const state = hasEnded(c) ? "ENDED (tick auto-stops)" : "running";
+    return {
+      name: "campaign",
+      ok: true,
+      detail: `${c.label} [${c.flow}] · ${c.event.dateShort} · ${state} · ${c.source}`,
+    };
+  } catch (e) {
+    return { name: "campaign", ok: false, detail: (e as Error).message.slice(0, 300) };
+  }
+}
+
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   const auth = req.headers.get("authorization");
@@ -159,7 +183,7 @@ export async function GET(req: NextRequest) {
   // reported config below reflect the tabs the tick will actually use.
   await loadTabOverrides(true);
 
-  const [checks, switches] = await Promise.all([
+  const [checks, switches, campaign] = await Promise.all([
     Promise.all([
       checkEnv(),
       checkSheet(),
@@ -167,8 +191,10 @@ export async function GET(req: NextRequest) {
       checkGraph(),
       checkWati(),
       checkSlack(),
+      checkCampaign(),
     ]),
     readSwitches().catch(() => null),
+    loadCampaign().catch(() => null),
   ]);
   const ok = checks.every((c) => c.ok);
 
@@ -194,8 +220,23 @@ export async function GET(req: NextRequest) {
             }
           : "unreadable",
         watiWebhook: env.watiWebhookSecret() ? "secret set" : "no secret (webhook disabled)",
-        eventStartUtc: WORKSHOP.eventStartUtc,
-        reminders: REMINDERS.map((r) => `${r.key} @ ${r.at}`),
+        // Campaign-derived, not module constants. Reporting WORKSHOP/REMINDERS here
+        // was how EVENT_* being unset in production stayed invisible: health showed
+        // the config.ts defaults and called them healthy, while the live campaign
+        // ran on a previous workshop's dates.
+        campaign: campaign
+          ? {
+              label: campaign.label,
+              flow: campaign.flow,
+              managed: campaign.managed,
+              eventStartUtc: campaign.event.startUtc,
+              dateShort: campaign.event.dateShort,
+              venue: campaign.event.venue,
+              ended: hasEnded(campaign),
+              reminders: campaign.reminders.map((r) => `${r.key} @ ${r.at}`),
+              source: campaign.source,
+            }
+          : "unreadable",
         tickBudgetMs: env.tickBudgetMs(),
       },
     },
