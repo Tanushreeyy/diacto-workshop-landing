@@ -18,21 +18,36 @@
 //   * It is a mutex, not a transaction. It orders OUR writes; it cannot stop a
 //     human editing the sheet underneath us. The phone-keyed reconcile in the
 //     tick is the backstop for rows that raced before this existed.
-let chain: Promise<unknown> = Promise.resolve();
+//   * It is ONE CHAIN PER SHEET, not one globally. A single chain would serialise
+//     campaigns against each other: two workshops running from two spreadsheets
+//     cannot corrupt each other's rows — they share no table — so making one wait
+//     on the other buys nothing and costs throughput on a tick that already runs
+//     to a time budget. Same-sheet writers still queue, which is the whole point.
+const chains = new Map<string, Promise<unknown>>();
 
-export function withSheetLock<T>(label: string, fn: () => Promise<T>): Promise<T> {
+export function withSheetLock<T>(
+  label: string,
+  fn: () => Promise<T>,
+  // Which sheet is being written. Defaults to a shared chain so existing callers
+  // keep exactly their previous behaviour.
+  scope = "default",
+): Promise<T> {
+  const prev = chains.get(scope) ?? Promise.resolve();
   // Chain off the previous holder's SETTLEMENT, not its success — one caller
   // throwing must not wedge the queue for everyone behind it.
-  const run = chain.then(
+  const run = prev.then(
     () => fn(),
     () => fn(),
   );
-  chain = run.then(
-    () => undefined,
-    (e) => {
-      console.error(`[lock] ${label} failed:`, e);
-      return undefined;
-    },
+  chains.set(
+    scope,
+    run.then(
+      () => undefined,
+      (e) => {
+        console.error(`[lock] ${label} failed:`, e);
+        return undefined;
+      },
+    ),
   );
   return run;
 }

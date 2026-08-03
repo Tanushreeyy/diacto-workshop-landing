@@ -18,8 +18,6 @@ import crypto from "crypto";
 import { env } from "./env";
 import {
   WORKSHOP,
-  WA_TEMPLATES,
-  WA_NURTURE_LADDER,
   STATUS,
   LeadStatus,
   STATUS_SOURCE,
@@ -28,6 +26,13 @@ import {
   outranks,
   WA_LEAD_ALERT_TEMPLATE,
 } from "./config";
+import {
+  loadCampaign,
+  campaignProblems,
+  describeCampaign,
+  hasEnded,
+  Campaign,
+} from "./campaign";
 import {
   readSwitches,
   readHeaderBaseline,
@@ -58,7 +63,7 @@ import { sendMail } from "./graph";
 import { sendTemplate } from "./wati";
 import { notifySlack } from "./slack";
 import { generatePass, generatePassBase64 } from "./pass";
-import { emailFor, waParamsFor, MsgCtx } from "./messages";
+import { emailFor, waParamsFor, MsgCtx, WaRole } from "./messages";
 import { dueForNurture, dueReminders, isQuietHours, nowIso } from "./schedule";
 import { phoneKey, toE164, isValidPhone, phoneProblem } from "./phone";
 import { samePerson } from "./names";
@@ -124,14 +129,34 @@ export const FORM = {
   phone: ["phone", "phone_number", "whatsapp_number", "whatsapp", "mobile_number", "mobile"],
   // Added by the v3 form (Snehal's qualifying questions). Absent from the older
   // form's tab — resolveHeader returns null there and ingest just leaves them blank.
-  designation: ["designation", "your_designation", "what_is_your_designation"],
-  company: ["company_name", "company", "organization_name", "organisation_name"],
+  //
+  // The "what's_your_…" / "enter_your_…" spellings come from the HR Campaign form,
+  // where Meta named each column after the question as the client phrased it. They
+  // matter more than the older variants did: the HR flow (sdr_assisted) has NO
+  // landing page, so a column that fails to resolve is not "collected later" — the
+  // answer is gone. All four HR qualifiers missed before these were added, which
+  // would have handed the SDRs a call list with no designation, company or team
+  // size, and rendered wa_lead_alert_full as four dashes out of seven.
+  designation: [
+    "designation",
+    "your_designation",
+    "what_is_your_designation",
+    "whats_your_designation",
+  ],
+  company: [
+    "company_name",
+    "company",
+    "organization_name",
+    "organisation_name",
+    "enter_your_company_name",
+  ],
   employeeCount: [
     "no_of_employees",
     "number_of_employees",
     "employee_count",
     "employees",
     "company_size",
+    "whats_your_employee_count",
   ],
   // The new Instant Form (Campaign2 tab) phrases it "where_are_you_based?"; the older
   // forms used "organization_location". The landing page prefills + hides it either way.
@@ -139,6 +164,7 @@ export const FORM = {
     "organization_location",
     "organisation_location",
     "where_are_you_based",
+    "where_are_you_located",
     "location",
     "city",
   ],
@@ -185,8 +211,8 @@ function firstNameOf(fullName: string): string {
 }
 
 const genToken = () => crypto.randomBytes(18).toString("base64url");
-const genRegId = () =>
-  `${WORKSHOP.regIdPrefix}-${WORKSHOP.eventMMDD}-${crypto
+const genRegId = (c: Campaign) =>
+  `${c.event.regIdPrefix}-${c.event.mmdd}-${crypto
     .randomInt(0, 10000)
     .toString()
     .padStart(4, "0")}`;
@@ -207,18 +233,33 @@ function failure(label: string, e: unknown): string {
 export const unsubscribeLink = (token: string) =>
   `${env.landingBaseUrl()}/api/unsubscribe?rid=${encodeURIComponent(token)}`;
 
-function ctxFor(name: string, token: string, regId?: string): MsgCtx {
+function ctxFor(c: Campaign, name: string, token: string, regId?: string): MsgCtx {
   return {
     firstName: firstNameOf(name),
     bookingLink: registrationLink(token),
     passUrl: passUrl(token),
     unsubscribeUrl: unsubscribeLink(token),
     regId,
-    dateLabel: WORKSHOP.dateLabel,
-    dateShort: WORKSHOP.dateShort,
-    timeLabel: WORKSHOP.timeLabel,
-    venue: WORKSHOP.venue,
-    mapUrl: WORKSHOP.mapUrl,
+    // The campaign's event, not the module constant. WORKSHOP is now only a
+    // fallback for sheets that predate the control-tab campaign config.
+    dateLabel: c.event.dateLabel,
+    dateShort: c.event.dateShort,
+    timeLabel: c.event.timeLabel,
+    venue: c.event.venue,
+    mapUrl: c.event.mapUrl,
+    support: WORKSHOP.supportNumber,
+  };
+}
+
+/** Event Pass fields for this campaign — so the pass prints the right workshop. */
+function passDataFor(c: Campaign, name: string, company: string, regId: string) {
+  return {
+    name,
+    company,
+    regId,
+    dateLabel: c.event.dateLabel,
+    timeLabel: c.event.timeLabel,
+    venue: c.event.venue,
     support: WORKSHOP.supportNumber,
   };
 }
@@ -287,11 +328,17 @@ export async function lookupLead(q: {
 // ─────────────────────────── REGISTER ───────────────────────────
 
 async function sendConfirmation(
+  c: Campaign,
   l: Prefill,
   regId: string,
   token: string,
+  // The tick already holds the switches. Passing them in stops sdr_assisted
+  // ingest doing a fresh control-tab read for every single lead — which on a busy
+  // tick is one extra Sheets call per person, against the quota this project
+  // trips first. Registration (over the web) has none to hand and reads its own.
+  known?: Switches,
 ): Promise<{ sent: string[]; failed: string[] }> {
-  const ctx = ctxFor(l.name, token, regId);
+  const ctx = ctxFor(c, l.name, token, regId);
   const sent: string[] = [];
   const failed: string[] = [];
 
@@ -300,14 +347,14 @@ async function sendConfirmation(
   // cover the Event Pass too: if email is off because the domain is in trouble,
   // "except this one" is not a useful exception. Fails open — an unreadable
   // control tab must never block someone's pass.
-  const switches = await readSwitches().catch(() => ALL_ON);
+  const switches = known ?? (await readSwitches().catch(() => ALL_ON));
 
   if (l.phone && switches.whatsapp) {
     try {
       await sendTemplate({
         whatsappNumber: l.phone,
-        templateName: WA_TEMPLATES.WA5,
-        parameters: waParamsFor(WA_TEMPLATES.WA5, ctx),
+        templateName: c.templates.wa5,
+        parameters: waParamsFor("wa5", ctx),
       });
       sent.push("WA-5");
     } catch (e) {
@@ -317,11 +364,7 @@ async function sendConfirmation(
   }
   if (l.email && switches.email) {
     try {
-      const pass = await generatePassBase64({
-        name: l.name,
-        company: l.company,
-        regId,
-      });
+      const pass = await generatePassBase64(passDataFor(c, l.name, l.company, regId));
       const { subject, html } = emailFor("EM5", ctx);
       await sendMail({
         to: l.email,
@@ -360,10 +403,17 @@ export interface RegisterResult {
 // single app process (see lock.ts).
 export async function registerLead(input: RegistrationInput): Promise<RegisterResult> {
   await loadTabOverrides(); // resolve tab names the same way the tick does — no split-brain
-  return withSheetLock("registerLead", () => registerLeadLocked(input));
+  // Same campaign the tick would use, loaded the same way. A registration that
+  // used different dates or a different template from the tick's reminders would
+  // be worse than one that failed.
+  const c = await loadCampaign();
+  return withSheetLock("registerLead", () => registerLeadLocked(c, input));
 }
 
-async function registerLeadLocked(input: RegistrationInput): Promise<RegisterResult> {
+async function registerLeadLocked(
+  c: Campaign,
+  input: RegistrationInput,
+): Promise<RegisterResult> {
   const auto = await readTable(env.autoTab());
   const e164 = toE164(input.phone);
   const key = phoneKey(input.phone);
@@ -392,7 +442,7 @@ async function registerLeadLocked(input: RegistrationInput): Promise<RegisterRes
     };
   }
 
-  const regId = genRegId();
+  const regId = genRegId(c);
   const token = row ? cell(auto, row, A.token) || genToken() : genToken();
 
   // The user's typed values win over whatever Meta had (profile emails go stale).
@@ -464,7 +514,7 @@ async function registerLeadLocked(input: RegistrationInput): Promise<RegisterRes
     expectations: pick(input.expectations, was.expectations),
   };
 
-  const { sent, failed } = await sendConfirmation(lead, regId, token);
+  const { sent, failed } = await sendConfirmation(c, lead, regId, token);
 
   await notifySlack(
     `:tada: *New registration* — ${lead.name}` +
@@ -496,6 +546,7 @@ interface FormLead {
 }
 
 async function ingestLead(
+  c: Campaign,
   auto: Table,
   l: FormLead,
   ledger: PromoLedger,
@@ -505,6 +556,21 @@ async function ingestLead(
   const e164 = toE164(l.phone);
   const key = phoneKey(l.phone);
   const waProblem = e164 ? phoneProblem(e164) : "no number";
+
+  // THE FLOW FORK.
+  //
+  // self_serve   — arriving on the form is an ENQUIRY. The row starts unregistered,
+  //                WA-1/EM-1 carry a booking link, and the nurture ladder chases
+  //                whoever never taps it. Registration happens later, on the
+  //                landing page, and that is what earns the Event Pass.
+  //
+  // sdr_assisted — arriving on the form IS the registration ("Confirmation Step 1",
+  //                agreed with the client on 1 Aug 2026). There is no booking link
+  //                to send and nothing to chase: SDRs confirm attendance by phone.
+  //                So the row is born registered, gets its reg ID immediately, and
+  //                the confirmation + Event Pass go out at once.
+  const isSdrAssisted = c.flow === "sdr_assisted";
+  const regId = isSdrAssisted ? genRegId(c) : "";
 
   // The append runs under the lock AND re-checks dedupe against a fresh read
   // inside it. The tick's outer knownIds/knownPhones sets are built from one
@@ -538,7 +604,16 @@ async function ingestLead(
       [A.status]: waProblem ? STATUS.invalid_number : "",
       [A.statusAt]: waProblem ? nowIso() : "",
       [A.statusSource]: waProblem ? STATUS_SOURCE.validation : "",
-      [A.promoToday]: "1", // the WA-1/EM-1 touch below
+      // sdr_assisted: the submission IS the registration, so the row is born
+      // complete. This is also what makes the reminders apply to them — they are
+      // sent to registered rows — and what keeps the nurture ladder off their back.
+      [A.regId]: regId,
+      [A.done]: isSdrAssisted ? "TRUE" : "",
+      [A.registeredAt]: isSdrAssisted ? nowIso() : "",
+      // The promo ledger counts PROMOTIONAL touches. self_serve's WA-1 is one — it
+      // is chasing a booking. sdr_assisted's confirmation is transactional, exactly
+      // like the Event Pass, so it must not consume someone's daily allowance.
+      [A.promoToday]: isSdrAssisted ? "0" : "1",
       [A.promoDay]: istDay(),
       [A.lastNudge]: nowIso(),
     });
@@ -546,7 +621,50 @@ async function ingestLead(
   });
   if (!didAppend) return; // already present — nothing sent
 
-  const ctx = ctxFor(l.name, token);
+  // ── sdr_assisted: confirmation + Event Pass, right now. ──
+  //
+  // Deliberately BEFORE the promo-limit gate below: this is a transactional
+  // message the person earned by registering, and withholding somebody's Event
+  // Pass to stay under a marketing quota would be the wrong failure. Same
+  // reasoning config.ts gives for exempting confirmations and reminders.
+  if (isSdrAssisted) {
+    const lead: Prefill = {
+      name: l.name,
+      email: l.email,
+      phone: e164,
+      designation: l.designation,
+      company: l.company,
+      location: l.location,
+      employeeCount: l.employeeCount,
+      years: l.years,
+      expectations: "",
+    };
+    const r = await sendConfirmation(c, lead, regId, token, switches);
+    if (r.sent.some((s) => s.startsWith("EM-5"))) {
+      await withSheetLock("ingestLead.passSent", async () => {
+        const fresh = await readTable(env.autoTab());
+        const mine = fresh.rows.find((x) => cell(fresh, x, A.token) === token);
+        if (mine) await updateRow(fresh, mine.rowNumber, { [A.passSent]: nowIso() });
+      });
+    }
+    await notifySlack(
+      `:inbox_tray: *New lead — registered on submission* (${c.label})\n` +
+        `• ${l.name || "Unknown"}` +
+        (l.designation ? `, ${l.designation}` : "") +
+        (l.company ? ` @ ${l.company}` : "") +
+        `\n• Reg ID: *${regId}*` +
+        `\n• ${e164 || "no number"} · ${l.email || "no email"}` +
+        (r.sent.length ? `\n• Sent: ${r.sent.join(" + ")}` : "") +
+        (r.failed.length ? `\n• :warning: Failed: ${r.failed.join(", ")}` : "") +
+        `\n• _SDR to call and confirm attendance._`,
+    );
+    await alertOpsNewLead(l, e164).catch((e) =>
+      console.error(`[ingest] ops WhatsApp alert failed for ${l.leadId}:`, e),
+    );
+    return;
+  }
+
+  const ctx = ctxFor(c, l.name, token);
   const sent: string[] = [];
   const failed: string[] = [];
 
@@ -578,8 +696,8 @@ async function ingestLead(
     try {
       await sendTemplate({
         whatsappNumber: e164,
-        templateName: WA_TEMPLATES.WA1,
-        parameters: waParamsFor(WA_TEMPLATES.WA1, ctx),
+        templateName: c.templates.wa1,
+        parameters: waParamsFor("wa1", ctx),
       });
       sent.push("WA-1");
     } catch (e) {
@@ -753,6 +871,7 @@ export function phoneUsable(auto: Table, row: SheetRow, switches: Switches): str
 }
 
 async function nurtureLead(
+  c: Campaign,
   auto: Table,
   row: SheetRow,
   ledger: PromoLedger,
@@ -766,9 +885,16 @@ async function nurtureLead(
   // untouched and picked up whenever the channel comes back.
   if (!phone && !email) return;
   const token = cell(auto, row, A.token);
-  const ctx = ctxFor(name, token);
+  const ctx = ctxFor(c, name, token);
   const stage = parseInt(cell(auto, row, A.nurtureStage) || "0", 10) || 0;
-  const tpl = WA_NURTURE_LADDER[Math.min(stage, WA_NURTURE_LADDER.length - 1)];
+  // The chasing ladder: WA-2 → WA-3 → WA-4, then WA-4 repeats until they register.
+  // Campaign-scoped now, so two campaigns cannot share one ladder.
+  const ladder: [WaRole, string][] = [
+    ["wa2", c.templates.wa2],
+    ["wa3", c.templates.wa3],
+    ["wa4", c.templates.wa4],
+  ];
+  const [role, tpl] = ladder[Math.min(stage, ladder.length - 1)];
   const emailKind = stage === 0 ? "EM2" : stage === 1 ? "EM3" : "EM4";
 
   const sent: string[] = [];
@@ -796,7 +922,7 @@ async function nurtureLead(
       await sendTemplate({
         whatsappNumber: phone,
         templateName: tpl,
-        parameters: waParamsFor(tpl, ctx),
+        parameters: waParamsFor(role, ctx),
       });
       sent.push(tpl);
     } catch (e) {
@@ -824,12 +950,13 @@ async function nurtureLead(
 }
 
 async function remindLead(
+  c: Campaign,
   auto: Table,
   row: SheetRow,
   switches: Switches,
 ): Promise<number> {
   const sentCsv = cell(auto, row, A.remindersSent);
-  const due = dueReminders(sentCsv);
+  const due = dueReminders(sentCsv, c.reminders, c.event.startMs);
   if (!due.length) return 0;
 
   const name = cell(auto, row, A.name) || "Guest";
@@ -838,7 +965,7 @@ async function remindLead(
   const phone = phoneUsable(auto, row, switches);
   const regId = cell(auto, row, A.regId);
   const token = cell(auto, row, A.token);
-  const ctx = ctxFor(name, token, regId || undefined);
+  const ctx = ctxFor(c, name, token, regId || undefined);
 
   const already = new Set(sentCsv.split(",").map((s) => s.trim()).filter(Boolean));
   const justSent: string[] = [];
@@ -880,23 +1007,25 @@ async function remindLead(
           ? [
               {
                 name: `Event_Pass_${firstNameOf(name)}.pdf`,
-                contentBytes: await generatePassBase64({ name, company, regId }),
+                contentBytes: await generatePassBase64(
+                  passDataFor(c, name, company, regId),
+                ),
                 contentType: "application/pdf",
               },
             ]
           : undefined;
         await sendMail({ to: email, subject, html, attachments });
       } else {
-        const tpl =
+        const [role, tpl]: [WaRole, string] =
           r.key === "WA6"
-            ? WA_TEMPLATES.WA6
+            ? ["wa6", c.templates.wa6]
             : r.key === "WA7"
-              ? WA_TEMPLATES.WA7
-              : WA_TEMPLATES.WA8;
+              ? ["wa7", c.templates.wa7]
+              : ["wa8", c.templates.wa8];
         await sendTemplate({
           whatsappNumber: phone,
           templateName: tpl,
-          parameters: waParamsFor(tpl, ctx),
+          parameters: waParamsFor(role, ctx),
         });
       }
       justSent.push(r.key);
@@ -934,6 +1063,7 @@ export interface TickSummary {
   formRows: number;
   leads: number;
   switches: string; // which switches were in effect this tick
+  campaign: string; // which campaign this tick ran for (see campaign.ts)
   halted: boolean; // preflight refused to run — the sheet looks damaged
   throttled: number; // rows held back by the per-person daily promo limit
   deferredIngest: number; // form rows left in place because no channel could carry WA-1/EM-1
@@ -955,6 +1085,22 @@ export async function runTick(): Promise<TickSummary> {
   // Load control-tab tab-name overrides BEFORE resolving any tab name below, so
   // form/automation/calling all point where the control tab says.
   await loadTabOverrides();
+
+  // WHICH CAMPAIGN IS THIS? Loaded before anything is read for sending, because a
+  // campaign we cannot describe is one we must not message for. loadCampaign
+  // throws when the control tab is unreadable — deliberately fail-closed, unlike
+  // the switches — so announce it rather than dying silently into a 500 that only
+  // the cron caller ever sees.
+  let campaign: Campaign;
+  try {
+    campaign = await loadCampaign();
+  } catch (e) {
+    await notifySlack(
+      `:octagonal_sign: *TICK HALTED — campaign config could not be read.* Nothing was sent.\n` +
+        `• ${(e as Error).message}`,
+    ).catch(() => {});
+    throw e;
+  }
 
   // One tab per live Instant Form. A tab that doesn't exist yet (the next form's
   // connection hasn't run) resolves to null and is simply skipped.
@@ -980,6 +1126,7 @@ export async function runTick(): Promise<TickSummary> {
     switches:
       `ingest=${switches.ingest} nurture=${switches.nurture} reminders=${switches.reminders}` +
       ` | email=${switches.email} whatsapp=${switches.whatsapp} deliveryCheck=${switches.deliveryCheck} [${switches.source}]`,
+    campaign: describeCampaign(campaign),
     halted: false,
     throttled: 0,
     deferredIngest: 0,
@@ -989,6 +1136,38 @@ export async function runTick(): Promise<TickSummary> {
     truncated: false,
     errors: [],
   };
+
+  // 0a) CAMPAIGN — do we know what we are running, and is it still running?
+  //
+  // Before the sheet is checked, because a valid sheet described by a broken
+  // campaign is the more dangerous combination: everything looks healthy and the
+  // messages go out carrying the wrong date. This is the check that would have
+  // caught EVENT_* being unset in production on 1 Aug 2026, when the live campaign
+  // was quietly running on a previous workshop's dates.
+  const campaignIssues = campaignProblems(campaign);
+  if (campaignIssues.length) {
+    summary.errors.push(...campaignIssues.map((p) => `campaign: ${p}`));
+    summary.halted = true;
+    await notifySlack(
+      `:octagonal_sign: *TICK HALTED — the campaign config is not usable.* Nothing was sent.\n` +
+        campaignIssues.map((p) => `• ${p}`).join("\n") +
+        `\n\nFix the \`control\` tab in the campaign's sheet; the next tick resumes on its own.`,
+    ).catch(() => {});
+    return summary;
+  }
+
+  // Auto-stop. Once the workshop has started there is nobody left to ingest,
+  // chase or remind, and an old sheet left connected must not quietly keep
+  // messaging people. Derived from the event itself so there is no flag for
+  // anyone to forget. Silent by design — this is the normal end of a campaign,
+  // not a fault, and it would otherwise announce itself every five minutes.
+  if (hasEnded(campaign)) {
+    summary.halted = true;
+    summary.errors.push(
+      `campaign ended — ${campaign.label} started at ${campaign.event.startUtc}`,
+    );
+    return summary;
+  }
 
   // 0) PREFLIGHT — is the automation tab still the automation tab?
   //
@@ -1092,6 +1271,7 @@ export async function runTick(): Promise<TickSummary> {
 
       try {
         await ingestLead(
+          campaign,
           auto,
           {
             leadId,
@@ -1243,14 +1423,28 @@ export async function runTick(): Promise<TickSummary> {
       if (registered) {
         // dueReminders is consulted first so the live read only happens when
         // something is actually going out.
-        if (switches.reminders && dueReminders(cell(auto, row, A.remindersSent)).length) {
+        if (
+          switches.reminders &&
+          dueReminders(cell(auto, row, A.remindersSent), campaign.reminders, campaign.event.startMs)
+            .length
+        ) {
           if (!(await stillAllowed())) {
             summary.suppressed++;
             continue;
           }
-          summary.remindersSent += await remindLead(auto, row, switches);
+          summary.remindersSent += await remindLead(campaign, auto, row, switches);
         }
-      } else if (switches.nurture && !quiet && dueForNurture(cell(auto, row, A.lastNudge))) {
+        // Chasing only exists in self_serve, where a lead has a booking link they
+        // have not yet tapped. In sdr_assisted the form submission already IS the
+        // registration and humans do the following up, so there is nothing to
+        // chase — and its wa2/wa3/wa4 slots are deliberately empty, which would
+        // otherwise mean sending a blank template name.
+      } else if (
+        campaign.flow === "self_serve" &&
+        switches.nurture &&
+        !quiet &&
+        dueForNurture(cell(auto, row, A.lastNudge))
+      ) {
         // Hard ceiling on chasing, independent of whatever the schedule thinks.
         // If this ever bites, the schedule and the state disagree — which is the
         // shape every resend incident has taken.
@@ -1262,7 +1456,7 @@ export async function runTick(): Promise<TickSummary> {
           summary.suppressed++;
           continue;
         }
-        await nurtureLead(auto, row, ledger, switches);
+        await nurtureLead(campaign, auto, row, ledger, switches);
         summary.nurtured++;
       }
     } catch (e) {
@@ -1305,14 +1499,18 @@ export async function passPdfForToken(
   token: string,
 ): Promise<{ bytes: Uint8Array; filename: string } | null> {
   await loadTabOverrides();
-  const auto = await readTable(env.autoTab());
+  // The pass is regenerated on every download, so it must be stamped with THIS
+  // campaign's event — not config.ts's defaults, which are whatever the last
+  // campaign left behind. An attendee re-opening their pass link would otherwise
+  // be handed a PDF for the previous workshop.
+  const [c, auto] = await Promise.all([loadCampaign(), readTable(env.autoTab())]);
   const row = auto.rows.find((r) => cell(auto, r, A.token) === token);
   if (!row) return null;
   const regId = cell(auto, row, A.regId);
   if (!regId) return null;
   const name = cell(auto, row, A.name) || "Guest";
   const company = cell(auto, row, A.company);
-  const bytes = await generatePass({ name, company, regId });
+  const bytes = await generatePass(passDataFor(c, name, company, regId));
   return { bytes, filename: `Event_Pass_${firstNameOf(name)}.pdf` };
 }
 

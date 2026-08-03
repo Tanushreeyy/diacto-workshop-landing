@@ -124,11 +124,11 @@ export const env = {
   // env var authoritative. The override is only honoured once loadTabOverrides()
   // has run for this entry point — every public entry point awaits it first.
   formTabs: () =>
-    (tabOverride("form_tab") || req("SHEET_FORM_TAB"))
+    (tabOverride("form_tab", req("SHEET_ID")) || req("SHEET_FORM_TAB"))
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean),
-  autoTab: () => tabOverride("automation_tab") || req("SHEET_AUTOMATION_TAB"),
+  autoTab: () => tabOverride("automation_tab", req("SHEET_ID")) || req("SHEET_AUTOMATION_TAB"),
   // Kill switches live in the sheet so pausing never needs a deploy. A missing
   // TAB still means "everything enabled" (control.ts fails open by design); a
   // missing VARIABLE is a misconfiguration and is refused here. Deliberately NOT
@@ -138,7 +138,7 @@ export const env = {
   // optional — for this campaign dispositions arrive via the form tab's Remark
   // column instead (see syncFormRemarks). Point `calling_tab` in the control tab
   // (or SHEET_CALLING_TAB) at a real tab to also sync one.
-  callingTab: () => tabOverride("calling_tab") || opt("SHEET_CALLING_TAB", ""),
+  callingTab: () => tabOverride("calling_tab", req("SHEET_ID")) || opt("SHEET_CALLING_TAB", ""),
 
   // WhatsApp (WATI)
   watiEndpoint: () => req("WATI_API_ENDPOINT").replace(/\/+$/, ""),

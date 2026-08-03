@@ -1,4 +1,4 @@
-import { WORKSHOP, WA_TEMPLATES } from "./config";
+import { WORKSHOP } from "./config";
 // Message content: renders the designed email templates + maps WhatsApp
 // template variables. Email HTML/subjects live in email-templates/*.html and are
 // bundled into emailTemplates.ts via `npm run build-emails`.
@@ -57,16 +57,29 @@ export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: 
 //   WA-6…WA-8 : {{1}} first name · {{2}} Event Pass link   (relative time, no date)
 // The date lives in {{2}} — weekday and date together — so postponing the workshop
 // is a single env var (EVENT_DATE_SHORT) and never a template rebuild.
-export function waParamsFor(templateName: string, ctx: MsgCtx): WaParam[] {
-  const T = WA_TEMPLATES;
+/**
+ * Which message in the ladder this is — NOT which template name is configured.
+ *
+ * This used to be decided by matching the template name against WA_TEMPLATES.
+ * That tied variable ORDER to campaign CONFIG: point WATI_TPL_WA8 at a name the
+ * constant didn't know (as production did — WATI_TPL_WA8=wa_two_hour) and the
+ * match failed, so the message silently fell to the 2-variable branch. It worked
+ * only because WA-8 genuinely takes 2. A campaign whose WA-5 name was unrecognised
+ * would have sent the pass link where the date belonged.
+ *
+ * The caller always knows which rung it is sending. So it says so.
+ */
+export type WaRole = "wa1" | "wa2" | "wa3" | "wa4" | "wa5" | "wa6" | "wa7" | "wa8";
+
+export function waParamsFor(role: WaRole, ctx: MsgCtx): WaParam[] {
   const fn: WaParam = { name: "1", value: ctx.firstName };
   // WA-1..4 (not yet registered) point at the registration link;
   // WA-5..8 (registered) point at the Event Pass download.
-  const isPreRegistration = ([T.WA1, T.WA2, T.WA3, T.WA4] as string[]).includes(templateName);
+  const isPreRegistration = role === "wa1" || role === "wa2" || role === "wa3" || role === "wa4";
   const link = isPreRegistration ? ctx.bookingLink : (ctx.passUrl ?? ctx.bookingLink);
 
   // WA-1…WA-5 print the date, so it rides as {{2}} and the link shifts to {{3}}.
-  const carriesDate = ([T.WA1, T.WA2, T.WA3, T.WA4, T.WA5] as string[]).includes(templateName);
+  const carriesDate = isPreRegistration || role === "wa5";
   if (carriesDate) {
     return [fn, { name: "2", value: ctx.dateShort }, { name: "3", value: link }];
   }

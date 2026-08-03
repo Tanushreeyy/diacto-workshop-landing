@@ -144,7 +144,9 @@ export async function loadTabOverrides(force = false): Promise<void> {
       }
     }
   }
-  setTabOverrides(next);
+  // Parked against the sheet they came from, so a second campaign in the same
+  // process cannot overwrite the first's tab names (see tabOverrides.ts).
+  setTabOverrides(next, env.sheetId());
   tabOverridesLoadedAt = now;
 }
 
