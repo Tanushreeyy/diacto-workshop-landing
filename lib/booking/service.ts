@@ -24,7 +24,6 @@ import {
   StatusSource,
   policyFor,
   outranks,
-  WA_LEAD_ALERT_TEMPLATE,
 } from "./config";
 import {
   loadCampaign,
@@ -658,7 +657,7 @@ async function ingestLead(
         (r.failed.length ? `\n• :warning: Failed: ${r.failed.join(", ")}` : "") +
         `\n• _SDR to call and confirm attendance._`,
     );
-    await alertOpsNewLead(l, e164).catch((e) =>
+    await alertOpsNewLead(c, l, e164).catch((e) =>
       console.error(`[ingest] ops WhatsApp alert failed for ${l.leadId}:`, e),
     );
     return;
@@ -727,7 +726,7 @@ async function ingestLead(
   // WhatsApp kill-switch: this is an internal notification, not campaign messaging,
   // so silencing leads must not silence the team's own heads-up. No-op until a
   // number is set in the control tab AND the alert template is approved in WATI.
-  await alertOpsNewLead(l, e164).catch((e) =>
+  await alertOpsNewLead(c, l, e164).catch((e) =>
     console.error(`[ingest] ops WhatsApp alert failed for ${l.leadId}:`, e),
   );
 }
@@ -737,10 +736,16 @@ async function ingestLead(
 // phone) by default — both are always present. Never throws: a missing number, a
 // still-pending template or a WATI hiccup must not fail an ingest that already
 // created the row and messaged the lead.
-async function alertOpsNewLead(l: FormLead, e164: string): Promise<void> {
+async function alertOpsNewLead(c: Campaign, l: FormLead, e164: string): Promise<void> {
   const raw = (await readSetting("lead_alert_number")) || "";
   const numbers = raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
   if (!numbers.length) return;
+  // The campaign's own template, not the env default. This was reading
+  // WA_LEAD_ALERT_TEMPLATE — so a control tab that asked for the 7-field alert
+  // still got the 2-field one, and the param count below was decided from the
+  // env name rather than the one actually being sent.
+  const template = c.templates.leadAlert;
+  if (!template) return;
   // Meta rejects a template send with an empty (or newline-bearing) body param, so
   // every value is squashed to a single line and falls back to "—" when the lead
   // left it blank or the form tab lacks that column (older forms have no years/loc).
@@ -748,7 +753,7 @@ async function alertOpsNewLead(l: FormLead, e164: string): Promise<void> {
   // The full template (wa_lead_alert_full) carries all seven instant-form fields;
   // the 2-field safeproof (wa_lead_alert) only ever needs name + phone. Match the
   // param count to whichever is configured so we never over/under-fill.
-  const parameters = WA_LEAD_ALERT_TEMPLATE.includes("full")
+  const parameters = template.includes("full")
     ? [
         { name: "1", value: v(l.name) },
         { name: "2", value: v(e164 || l.phone) },
@@ -764,7 +769,7 @@ async function alertOpsNewLead(l: FormLead, e164: string): Promise<void> {
       ];
   for (const number of numbers) {
     try {
-      await sendTemplate({ whatsappNumber: number, templateName: WA_LEAD_ALERT_TEMPLATE, parameters });
+      await sendTemplate({ whatsappNumber: number, templateName: template, parameters });
     } catch (e) {
       console.error(`[ingest] ops alert to ${number} failed:`, e);
     }
