@@ -17,8 +17,13 @@ const { WORKSHOP, WA_TEMPLATES, REMINDERS } = await import("../lib/booking/confi
 const { waParamsFor } = await import("../lib/booking/messages.js");
 const { dueReminders } = await import("../lib/booking/schedule.js");
 
-const BTB = process.env.SHEET_ID!;
-const HR = "15UVNp073mXm97FEADXdt0o3re4YNpu9-2YsxMF39Ky8";
+// Both sheets are named outright. BTB used to come from process.env.SHEET_ID,
+// which was true only while production still pointed at it — the moment SHEET_ID
+// flipped to HR the "legacy" section started loading HR and failing six checks
+// that were never about HR. A regression test must not move with the thing it
+// is testing.
+const BTB = "1qt-4O2Z0XiUetYitGd4aAVr60FPnH5XKgG1nhMT5IZ8"; // Business Transformation Blueprint, 1 Aug 2026
+const HR = "15UVNp073mXm97FEADXdt0o3re4YNpu9-2YsxMF39Ky8"; // HR Workshop, 12 Aug 2026
 let failures = 0;
 const check = (name: string, ok: boolean, detail = "") => {
   if (!ok) failures++;
