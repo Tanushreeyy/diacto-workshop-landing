@@ -260,6 +260,11 @@ function passDataFor(c: Campaign, name: string, company: string, regId: string) 
     timeLabel: c.event.timeLabel,
     venue: c.event.venue,
     support: WORKSHOP.supportNumber,
+    // undefined, not "", so pass.ts falls back to its literal for any cell the
+    // control tab leaves blank. Passing "" would draw an empty line instead.
+    ...Object.fromEntries(
+      Object.entries(c.event.pass).filter(([, v]) => String(v).trim()),
+    ),
   };
 }
 

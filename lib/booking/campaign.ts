@@ -69,6 +69,26 @@ export interface CampaignEvent {
   mapUrl: string;
   startUtc: string;
   startMs: number;
+  /**
+   * The Event Pass PDF's left panel — the campaign's branding.
+   *
+   * These were literals inside pass.ts, so the HR workshop's first 42 passes
+   * went out headed "HIGH-PERFORMANCE TEAMS WORKSHOP" and footed "FOUNDERS &
+   * BUSINESS OWNERS ONLY", while the right panel of the same page correctly
+   * read HR Workshop, 12 August. An HR manager reading that could reasonably
+   * decide the event was not for them.
+   *
+   * Blank means "keep the literal", so a pre-Phase-0 sheet is untouched.
+   */
+  pass: {
+    titleLine1: string;
+    titleLine2: string;
+    subtitle: string;
+    pillar1: string;
+    pillar2: string;
+    tagline: string;
+    audience: string;
+  };
 }
 
 export interface Campaign {
@@ -292,6 +312,17 @@ export async function loadCampaign(): Promise<Campaign> {
       mapUrl: get("event_map_url", WORKSHOP.mapUrl),
       startUtc,
       startMs,
+      // Blank (not a literal default) so pass.ts keeps its own fallback — that
+      // way an unmanaged sheet renders exactly the pass it always did.
+      pass: {
+        titleLine1: get("pass_title_line1", ""),
+        titleLine2: get("pass_title_line2", ""),
+        subtitle: get("pass_subtitle", ""),
+        pillar1: get("pass_pillar_1", ""),
+        pillar2: get("pass_pillar_2", ""),
+        tagline: get("pass_tagline", ""),
+        audience: get("pass_audience", ""),
+      },
     },
     templates: {
       wa1: tpl("tpl_wa_booking_pending", WA_TEMPLATES.WA1),

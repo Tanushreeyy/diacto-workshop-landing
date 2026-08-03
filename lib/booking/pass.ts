@@ -14,6 +14,18 @@ export interface PassData {
   timeLabel?: string;
   venue?: string;
   support?: string;
+  // Left panel — the campaign's own branding. These were hardcoded to the
+  // founder workshop, so the HR campaign's first 42 passes went out reading
+  // "HIGH-PERFORMANCE TEAMS WORKSHOP … FOUNDERS & BUSINESS OWNERS ONLY" while
+  // the right panel correctly said HR Workshop, 12 August. Anything left
+  // undefined keeps the old literal, so an unmanaged campaign is unchanged.
+  titleLine1?: string;
+  titleLine2?: string;
+  subtitle?: string;
+  pillar1?: string;
+  pillar2?: string;
+  tagline?: string;
+  audience?: string;
 }
 
 const NAVY = rgb(0.043137, 0.117647, 0.2);
@@ -64,6 +76,13 @@ export async function generatePass(data: PassData): Promise<Uint8Array> {
   const timeLabel = data.timeLabel ?? WORKSHOP.timeLabel;
   const venue = data.venue ?? WORKSHOP.venue;
   const support = data.support ?? WORKSHOP.supportNumber;
+  const titleLine1 = data.titleLine1 ?? "HIGH-PERFORMANCE";
+  const titleLine2 = data.titleLine2 ?? "TEAMS WORKSHOP";
+  const subtitle = data.subtitle ?? "A Business Growth Workshop for Founders";
+  const pillar1 = data.pillar1 ?? "Hire Right. Train Right.";
+  const pillar2 = data.pillar2 ?? "Manage Right. Retain Right.";
+  const tagline = data.tagline ?? "“Great Teams Build Great Businesses.”";
+  const audience = data.audience ?? "FREE ENTRY  |  FOUNDERS & BUSINESS OWNERS ONLY";
 
   const doc = await PDFDocument.create();
   const page = doc.addPage([595.2756, 255.1181]);
@@ -86,20 +105,25 @@ export async function generatePass(data: PassData): Promise<Uint8Array> {
   page.drawRectangle({ x: 0, y: 0, width: 249.4488, height: 8.503937, color: GOLD });
 
   // Left panel
+  // Every left-panel string is fitted rather than drawn flat. They used to be
+  // literals that were known to fit; now they come from the campaign, and an HR
+  // title is half again as long as "HIGH-PERFORMANCE". Without fitting, the
+  // overflow runs off the navy panel and onto the attendee's name.
+  const LEFT_MAX = 192.7559; // x=28.34646 out to the divider at 221.1024
   t("DIACTO TECHNOLOGIES PVT LTD PRESENTS", 28.34646, 218.2677, 8.5, bold, GOLD);
-  t("HIGH-PERFORMANCE", 28.34646, 187.0866, 19, bold, WHITE);
-  t("TEAMS WORKSHOP", 28.34646, 164.4094, 19, bold, WHITE);
-  t("A Business Growth Workshop for Founders", 28.34646, 141.7323, 9.5, helv, SLATE);
+  fitLeft(page, titleLine1, 28.34646, 187.0866, 19, bold, WHITE, LEFT_MAX);
+  fitLeft(page, titleLine2, 28.34646, 164.4094, 19, bold, WHITE, LEFT_MAX);
+  fitLeft(page, subtitle, 28.34646, 141.7323, 9.5, helv, SLATE, LEFT_MAX);
   page.drawLine({
     start: { x: 28.34646, y: 124.7244 },
     end: { x: 221.1024, y: 124.7244 },
     thickness: 0.6,
     color: DIV_LEFT,
   });
-  t("Hire Right. Train Right.", 28.34646, 102.0472, 10, bold, WHITE);
-  t("Manage Right. Retain Right.", 28.34646, 85.03937, 10, bold, WHITE);
-  t("“Great Teams Build Great Businesses.”", 28.34646, 53.85827, 9, boldObl, GOLD);
-  t("FREE ENTRY  |  FOUNDERS & BUSINESS OWNERS ONLY", 28.34646, 18.4252, 7, helv, FAINT);
+  fitLeft(page, pillar1, 28.34646, 102.0472, 10, bold, WHITE, LEFT_MAX);
+  fitLeft(page, pillar2, 28.34646, 85.03937, 10, bold, WHITE, LEFT_MAX);
+  fitLeft(page, tagline, 28.34646, 53.85827, 9, boldObl, GOLD, LEFT_MAX);
+  fitLeft(page, audience, 28.34646, 18.4252, 7, helv, FAINT, LEFT_MAX);
 
   // Right panel — attendee
   t("ATTENDEE", 277.7953, 221.1024, 7, bold, LABEL);
