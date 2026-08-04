@@ -1138,7 +1138,10 @@ export async function runTick(): Promise<TickSummary> {
     leads: auto.rows.length,
     switches:
       `ingest=${switches.ingest} nurture=${switches.nurture} reminders=${switches.reminders}` +
-      ` | email=${switches.email} whatsapp=${switches.whatsapp} deliveryCheck=${switches.deliveryCheck} [${switches.source}]`,
+      ` | email=${switches.email} whatsapp=${switches.whatsapp} deliveryCheck=${switches.deliveryCheck} [${switches.source}]` +
+      // Ambient, not a switch — but it silently changes what a tick does, so it
+      // belongs on the same line rather than being inferred from a zero count.
+      (isQuietHours() ? ` | QUIET HOURS (22:00-09:00 IST)` : ``),
     campaign: describeCampaign(campaign),
     halted: false,
     throttled: 0,
@@ -1225,6 +1228,11 @@ export async function runTick(): Promise<TickSummary> {
   // snapshot the rest of the tick uses, then kept current in memory as we send.
   const ledger = buildPromoLedger(auto);
 
+  // Evaluated ONCE for the whole tick rather than per lead, so a tick that
+  // straddles 22:00 treats every lead in it the same way. Used by ingest (below,
+  // self_serve only) and by nurture/reminders in step 2.
+  const quietNow = isQuietHours();
+
   // 1) INGEST — form rows we haven't seen (matched on lead id, then phone).
   // Dedupe sets are built once from the automation tab and shared across every
   // form tab, so the same person submitting both forms is ingested exactly once.
@@ -1256,6 +1264,30 @@ export async function runTick(): Promise<TickSummary> {
       if (!leadId || (!email && !phone)) continue;
       if (knownIds.has(leadId) || (phone && knownPhones.has(phoneKey(phone)))) continue;
       if (isTestLead(name, email, phone)) continue;
+
+      // Quiet hours gate the PROMOTIONAL half of ingest, and only that half.
+      //
+      // self_serve's WA-1 is a promotional message — it exists to chase a
+      // booking — so it belongs under the same 22:00-09:00 IST rule as the
+      // nurture ladder it begins. Ingest never consulted isQuietHours(), which
+      // was invisible while leads trickled in one at a time and became very
+      // visible the moment a backlog was released: 84 queued leads drained past
+      // midnight and five people got a "book your seat" WhatsApp at 22:39.
+      //
+      // sdr_assisted is deliberately NOT deferred. There the form submission IS
+      // the registration, so ingest sends a CONFIRMATION and the Event Pass —
+      // transactional, expected, and worse when late. Somebody who signs up at
+      // 23:00 should get their pass at 23:00, not at 09:00 the next morning.
+      // Same distinction the promo ledger already draws a few lines below, where
+      // sdr_assisted's confirmation is exempted from the daily promo allowance.
+      //
+      // Deferred, never dropped: the form row is simply left alone and ingest is
+      // driven off the form tab, so the next tick after 09:00 picks it up with
+      // its welcome intact.
+      if (quietNow && campaign.flow === "self_serve") {
+        summary.deferredIngest++;
+        continue;
+      }
 
       // Do not create the row until a channel can actually carry the welcome.
       //
@@ -1387,7 +1419,7 @@ export async function runTick(): Promise<TickSummary> {
   }
 
   // 2) NURTURE (not yet registered) + REMINDERS (registered).
-  const quiet = isQuietHours();
+  const quiet = quietNow;
   for (const row of auto.rows) {
     if (outOfTime()) { summary.truncated = true; break; }
     if (!cell(auto, row, A.token)) continue;
