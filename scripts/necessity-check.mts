@@ -24,6 +24,8 @@ const { readSwitches, readSetting, loadTabOverrides } = await import("../lib/boo
 const { readTable, resolveHeader } = await import("../lib/booking/google.js");
 const { env } = await import("../lib/booking/env.js");
 const { emailFor } = await import("../lib/booking/messages.js");
+const { FORM } = await import("../lib/booking/service.js");
+const { leadAlertFields } = await import("../lib/booking/config.js");
 
 let need = 0, warn = 0;
 const ok = (m: string) => console.log(`  ok    ${m}`);
@@ -109,9 +111,17 @@ if (!alertNums.length) {
   const name = c.templates.leadAlert;
   const t = name ? live.get(name) : null;
   const status = t ? (t.status || t.templateStatus || "?").toUpperCase() : "MISSING";
-  const wants7 = (name || "").includes("full");
+  // What the code WILL send, from the same function the sender uses.
+  const willSend = leadAlertFields(name || "").length;
+  // What the approved template actually asks for. WATI rejects the whole send on
+  // a count mismatch, and alertOpsNewLead only logs that failure — so without
+  // this the first symptom is ops quietly never hearing about a new lead again.
+  const body = String((t as any)?.body ?? (t as any)?.bodyOriginal ?? "");
+  const wants = new Set([...body.matchAll(/\{\{(\d+)\}\}/g)].map((m) => m[1])).size;
   if (status !== "APPROVED") NEED(`lead alert '${name}' is ${status}`);
-  else ok(`${alertNums.length} number(s) · ${name} APPROVED · sends ${wants7 ? 7 : 2} params`);
+  else if (wants && wants !== willSend)
+    NEED(`lead alert '${name}' expects ${wants} param(s) but the code sends ${willSend} — WATI will reject every alert`);
+  else ok(`${alertNums.length} number(s) · ${name} APPROVED · sends ${willSend} params`);
 }
 if (!process.env.SLACK_WEBHOOK_URL) NEED("SLACK_WEBHOOK_URL unset — no lead visibility at all");
 else ok("Slack webhook set");
@@ -129,11 +139,19 @@ for (const [label, tab] of [
     ok(`${label} tab '${tab}' readable — ${t.rows.length} row(s)`);
     if (label === "form") {
       // The four fields that silently failed to resolve on the HR form last week.
+      //
+      // Resolved against FORM — the SAME lists ingest uses — never a local copy.
+      // This block did keep its own copy, and it had drifted: it was missing
+      // `number_of_employees` and `where_are_you_based`, which is what the FOUNDER
+      // form actually calls those columns. So it reported two fields as broken on a
+      // form where ingest reads them perfectly well. A checker that can disagree
+      // with the code it checks is worse than no checker — it spends someone's
+      // afternoon on a bug that was never there.
       for (const [field, cands] of Object.entries({
-        designation: ["designation", "your_designation", "what_is_your_designation", "whats_your_designation"],
-        company: ["company_name", "company", "organization_name", "organisation_name", "enter_your_company_name"],
-        employee_count: ["employee_count", "employees", "team_size", "whats_your_employee_count"],
-        location: ["location", "city", "where_are_you_located", "your_location"],
+        designation: FORM.designation,
+        company: FORM.company,
+        employee_count: FORM.employeeCount,
+        location: FORM.location,
       })) {
         resolveHeader(t, cands)
           ? ok(`  form column '${field}' resolves`)

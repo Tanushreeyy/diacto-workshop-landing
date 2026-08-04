@@ -1,8 +1,7 @@
 import type { LandingEvent } from "@/lib/landingEvent";
-import BookButton from "@/components/ui/BookButton";
+import BookButton from "@/components/hr/ui/BookButton";
 import Reveal from "@/components/ui/Reveal";
-import EventChips from "@/components/ui/EventChips";
-import { EVENT } from "@/lib/event";
+import EventChips from "@/components/hr/ui/EventChips";
 
 export default function FinalCTA({ ev }: { ev: LandingEvent }) {
   return (
@@ -33,18 +32,16 @@ export default function FinalCTA({ ev }: { ev: LandingEvent }) {
         </Reveal>
 
         <Reveal delay={100}>
-          <p className="mt-5 font-sans text-base leading-relaxed text-white/80 md:text-lg">
-            Limited seats are available for every workshop.
-            <br />
-            Complete your booking to confirm your participation.
+          <p className="mx-auto mt-5 max-w-2xl font-sans text-base leading-relaxed text-white/80 md:text-lg">
+            Only 30 seats per session. Submit the form and your workshop pass
+            arrives on WhatsApp &amp; email.
           </p>
         </Reveal>
 
         <Reveal delay={200}>
+          {/* BACKEND INTEGRATION: booking modal attaches to this CTA */}
           <div className="mt-8">
-            <BookButton className="text-base md:text-lg md:min-h-[56px] md:px-10">
-              {EVENT.ctaText}
-            </BookButton>
+            <BookButton className="text-base md:min-h-[56px] md:px-10 md:text-lg" />
           </div>
         </Reveal>
 

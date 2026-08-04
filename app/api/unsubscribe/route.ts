@@ -9,6 +9,7 @@ import {
 import { STATUS, STATUS_SOURCE } from "@/lib/booking/config";
 import { loadTabOverrides } from "@/lib/booking/control";
 import { notifySlack } from "@/lib/booking/slack";
+import { withHost, hostOf, UnknownHostError, activeCampaign } from "@/lib/booking/routes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,19 @@ export const dynamic = "force-dynamic";
 const NAVY = "#0B1E33";
 const GOLD = "#D9A441";
 const CREAM = "#EEEBE4";
+
+// The banner used to be the literal "BUSINESS TRANSFORMATION BLUEPRINT", which
+// meant every HR registrant who clicked unsubscribe in an HR email was shown the
+// founder workshop's name — the same stale-branding bug the Event Pass had, on a
+// page nobody thinks to look at.
+//
+// Unknown campaigns get the neutral company name rather than a guess. A banner
+// that says less is never wrong; one that names the wrong workshop always is.
+const BANNER: Record<string, string> = {
+  founder: "BUSINESS TRANSFORMATION BLUEPRINT",
+  hr: "HR WORKSHOP · CANDIDHR BY DIACTO",
+};
+const banner = () => BANNER[activeCampaign()?.key ?? ""] ?? "DIACTO TECHNOLOGIES";
 
 function page(opts: {
   title: string;
@@ -47,7 +61,7 @@ function page(opts: {
 <div style="max-width:520px;margin:8vh auto;padding:0 20px;">
   <div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 14px rgba(11,30,51,.1);">
     <div style="background:${NAVY};padding:22px 28px;">
-      <p style="margin:0;letter-spacing:2px;font-size:13px;color:${GOLD};font-weight:bold;">BUSINESS TRANSFORMATION BLUEPRINT</p>
+      <p style="margin:0;letter-spacing:2px;font-size:13px;color:${GOLD};font-weight:bold;">${escapeHtml(banner())}</p>
     </div>
     <div style="padding:30px 28px;">
       <h1 style="margin:0 0 12px;font-size:21px;color:${NAVY};">${escapeHtml(opts.heading)}</h1>
@@ -66,8 +80,34 @@ const escapeAttr = escapeHtml;
 const html = (s: string, status = 200) =>
   new NextResponse(s, { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
 
+// Both handlers run inside the campaign that owns the host the link points at.
+// Unsubscribe links are built from that campaign's baseUrl, so the host is
+// always its own — and the token is only ever looked up in that campaign's
+// sheet, which is what stops one workshop's link from resolving against the
+// other's rows.
+function scoped<T>(req: NextRequest, fn: () => Promise<T>): Promise<T | NextResponse> {
+  try {
+    return withHost(hostOf(req), fn) as Promise<T>;
+  } catch (e) {
+    if (e instanceof UnknownHostError) {
+      return Promise.resolve(
+        html(page({ title: "Unsubscribe", heading: "Link not recognised", body: "This link does not belong to any current workshop." }), 404),
+      );
+    }
+    throw e;
+  }
+}
+
 // GET — render the confirm page. Never mutates.
 export async function GET(req: NextRequest) {
+  return scoped(req, () => handleGet(req));
+}
+
+export async function POST(req: NextRequest) {
+  return scoped(req, () => handlePost(req));
+}
+
+async function handleGet(req: NextRequest) {
   const url = new URL(req.url);
   const rid = url.searchParams.get("rid");
   const resub = url.searchParams.get("resubscribe") === "1";
@@ -123,7 +163,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST — the actual mutation, from the confirm button OR RFC 8058 one-click.
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   let rid = "";
   let action = "unsubscribe";
   const ct = req.headers.get("content-type") || "";

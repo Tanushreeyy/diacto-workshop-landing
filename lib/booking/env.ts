@@ -12,6 +12,14 @@ function opt(name: string, fallback = ""): string {
 }
 
 import { tabOverride } from "./tabOverrides";
+import { activeCampaign } from "./campaignContext";
+
+// The active campaign's value for a sheet-shaped setting, or "" when there is no
+// campaign in scope. Every getter below reads THIS before its env var, so a
+// deployment with CAMPAIGN_ROUTES unset (no campaign ever in scope) resolves
+// exactly the variables it always did — see routes.ts on why unset is supported.
+const active = (k: "sheetId" | "formTab" | "automationTab" | "controlTab" | "baseUrl"): string =>
+  activeCampaign()?.[k] || "";
 
 /** One Microsoft 365 app registration. */
 export interface GraphCreds {
@@ -96,7 +104,16 @@ export const env = {
   googleSaEmail: () => req("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
   // Private key is stored with escaped newlines in most hosts' env UIs.
   googlePrivateKey: () => req("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n"),
-  sheetId: () => req("SHEET_ID"),
+  // The campaign in scope owns the sheet id; SHEET_ID is the single-campaign
+  // fallback. google.ts reads this on every call, which is what makes one
+  // process able to serve two sheets without threading an id through 27 call
+  // sites — see campaignContext.ts.
+  sheetId: () => active("sheetId") || req("SHEET_ID"),
+  // The un-routed values, for routes.ts to build the implicit single campaign
+  // from. Only defaultRoute() may call these: everything else must go through
+  // the getters above so the active campaign is honoured.
+  rawSheetId: () => req("SHEET_ID"),
+  rawFormTab: () => req("SHEET_FORM_TAB"),
   // Meta's connector owns the form tabs — we only ever READ them.
   //
   // Comma-separated, because a new Instant Form gets a NEW connection and so a
@@ -123,22 +140,31 @@ export const env = {
   // campaign can be repointed WITHOUT a redeploy; a blank/absent row leaves the
   // env var authoritative. The override is only honoured once loadTabOverrides()
   // has run for this entry point — every public entry point awaits it first.
+  //
+  // Precedence is control tab → campaign route → env var. The control tab still
+  // wins, because repointing a LIVE campaign without a deploy is the whole
+  // reason overrides exist; the route only says which campaign is being asked
+  // about. Note the override is keyed by the RESOLVED sheet id, so each campaign
+  // reads its own control tab's overrides and never the other's.
   formTabs: () =>
-    (tabOverride("form_tab", req("SHEET_ID")) || req("SHEET_FORM_TAB"))
+    (tabOverride("form_tab", env.sheetId()) || active("formTab") || req("SHEET_FORM_TAB"))
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean),
-  autoTab: () => tabOverride("automation_tab", req("SHEET_ID")) || req("SHEET_AUTOMATION_TAB"),
+  autoTab: () =>
+    tabOverride("automation_tab", env.sheetId()) ||
+    active("automationTab") ||
+    req("SHEET_AUTOMATION_TAB"),
   // Kill switches live in the sheet so pausing never needs a deploy. A missing
   // TAB still means "everything enabled" (control.ts fails open by design); a
   // missing VARIABLE is a misconfiguration and is refused here. Deliberately NOT
   // overridable from the control tab — it is how the control tab is located.
-  controlTab: () => req("SHEET_CONTROL_TAB"),
+  controlTab: () => active("controlTab") || req("SHEET_CONTROL_TAB"),
   // A dedicated calling tab (legacy Status/Sub Status schema), read-only and
   // optional — for this campaign dispositions arrive via the form tab's Remark
   // column instead (see syncFormRemarks). Point `calling_tab` in the control tab
   // (or SHEET_CALLING_TAB) at a real tab to also sync one.
-  callingTab: () => tabOverride("calling_tab", req("SHEET_ID")) || opt("SHEET_CALLING_TAB", ""),
+  callingTab: () => tabOverride("calling_tab", env.sheetId()) || opt("SHEET_CALLING_TAB", ""),
 
   // WhatsApp (WATI)
   watiEndpoint: () => req("WATI_API_ENDPOINT").replace(/\/+$/, ""),
@@ -168,5 +194,9 @@ export const env = {
   // rest for the next run. Keeps us under ANY host's function timeout (Netlify
   // free ~10s, Vercel Hobby similar). Long-running hosts can raise it freely.
   tickBudgetMs: () => parseInt(opt("TICK_BUDGET_MS", "8000"), 10) || 8000,
-  landingBaseUrl: () => req("LANDING_BASE_URL").replace(/\/+$/, ""),
+  // Per campaign, because this builds the pass and booking links that go out in
+  // WhatsApp and email. A founder registrant handed a link on the HR domain
+  // would fetch a pass from the wrong sheet — the same misroute as the sheet id,
+  // just discovered a day later by someone at the entry desk.
+  landingBaseUrl: () => (active("baseUrl") || req("LANDING_BASE_URL")).replace(/\/+$/, ""),
 };

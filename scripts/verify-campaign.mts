@@ -37,10 +37,20 @@ const ctx = {
   dateLabel: "D", dateShort: "SHORT", timeLabel: "T", venue: "V", mapUrl: "M", support: "S",
 };
 
-// ── 1. Legacy sheet must be byte-identical to the old constants ──────────────
-console.log("\nLEGACY SHEET (no campaign rows) — must match pre-refactor behaviour");
+// ── 1. A sheet with NO campaign rows must still behave exactly as before ─────
+//
+// This used to point at the BTB sheet's `control` tab, which had no campaign
+// rows. It has them now — the founder workshop became a managed campaign on
+// 4 Aug — so the guarantee has to be tested somewhere that is still unmanaged.
+// `control_staging` is that place: same spreadsheet, switches only, no campaign
+// rows. Testing it here keeps the backwards-compatibility promise honest
+// without needing a live campaign to stay unconfigured forever.
+console.log("\nUNMANAGED SHEET (no campaign rows) — must match pre-refactor behaviour");
 process.env.SHEET_ID = BTB;
+const prevControlTab = process.env.SHEET_CONTROL_TAB;
+process.env.SHEET_CONTROL_TAB = "control_staging";
 const legacy = await loadCampaign();
+process.env.SHEET_CONTROL_TAB = prevControlTab;
 check("date/venue/start/prefix match config.ts",
   legacy.event.dateShort === WORKSHOP.dateShort &&
   legacy.event.venue === WORKSHOP.venue &&
@@ -58,6 +68,25 @@ check("reminder schedule identical to REMINDERS",
 check("flow defaults to self_serve", legacy.flow === "self_serve");
 check("not managed (falls back to env/config)", legacy.managed === false);
 check("validates clean", campaignProblems(legacy).length === 0);
+
+// ── 1b. The FOUNDER campaign, now managed from its own control tab ──────────
+console.log("\nFOUNDER SHEET (managed) — Business Transformation Blueprint");
+process.env.SHEET_ID = BTB;
+const fnd = await loadCampaign();
+check("flow is self_serve", fnd.flow === "self_serve", fnd.flow);
+check("managed", fnd.managed === true);
+check("reg prefix HPT (matches the 83 rows already issued)",
+  fnd.event.regIdPrefix === "HPT", fnd.event.regIdPrefix);
+check("event is Sat 8 Aug 2026, 15:00 IST",
+  fnd.event.startUtc === "2026-08-08T09:30:00Z", fnd.event.startUtc);
+check("MMDD 0808 from start", fnd.event.mmdd === "0808", fnd.event.mmdd);
+check("uses BTB templates, not the HR campaign's",
+  fnd.templates.wa5.includes("_btb_") && !fnd.templates.wa8.includes("_hr_"),
+  `${fnd.templates.wa5} / ${fnd.templates.wa8}`);
+check("two-hour template is the approved v3, not the generic fallback",
+  fnd.templates.wa8 === "wa_8_btb_two_hour_v3", fnd.templates.wa8);
+check("validates clean", campaignProblems(fnd).length === 0, campaignProblems(fnd).join("; "));
+check("not ended", hasEnded(fnd) === false);
 
 // ── 2. Variable mapping must be unchanged by the role refactor ───────────────
 // Old logic keyed off template NAME; new logic keys off role. Same output.

@@ -1,3 +1,4 @@
+import type { LandingEvent } from "@/lib/landingEvent";
 import BookButton from "@/components/ui/BookButton";
 import Reveal from "@/components/ui/Reveal";
 import EventChips from "@/components/ui/EventChips";
@@ -10,7 +11,7 @@ const LEARNINGS = [
   "Great Businesses",
 ];
 
-export default function Hero() {
+export default function Hero({ ev }: { ev: LandingEvent }) {
   return (
     <section
       id="hero"
@@ -93,7 +94,7 @@ export default function Hero() {
             delay={350}
             className="lg:col-span-2 lg:col-start-1 lg:row-start-5"
           >
-            <EventChips align="left" />
+            <EventChips ev={ev} align="left" />
           </Reveal>
 
           {/* CTA block (button + reassurance) */}

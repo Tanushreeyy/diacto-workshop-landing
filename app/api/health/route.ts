@@ -5,6 +5,7 @@ import { FORM } from "@/lib/booking/service";
 import { WA_TEMPLATES } from "@/lib/booking/config";
 import { readSwitches, loadTabOverrides } from "@/lib/booking/control";
 import { loadCampaign, campaignProblems, hasEnded } from "@/lib/booking/campaign";
+import { allRoutes, isMultiCampaign, withCampaign, hostOf, routeForHost } from "@/lib/booking/routes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -171,14 +172,16 @@ async function checkCampaign(): Promise<Check> {
   }
 }
 
-export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  const auth = req.headers.get("authorization");
-  const qs = new URL(req.url).searchParams.get("secret");
-  if (!secret || (auth !== `Bearer ${secret}` && qs !== secret)) {
-    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-  }
-
+/**
+ * Everything above is checked PER CAMPAIGN, inside that campaign's scope.
+ *
+ * Health used to answer for "the" campaign, because there was only ever one.
+ * With two live it has to answer for both — a green light that only covers the
+ * campaign whose sheet id happens to be in SHEET_ID is exactly the blind spot
+ * that let the founder sheet go unread for 46 hours while everything reported
+ * healthy.
+ */
+async function inspectCampaign() {
   // Resolve any control-tab tab-name overrides first, so the checks and the
   // reported config below reflect the tabs the tick will actually use.
   await loadTabOverrides(true);
@@ -198,8 +201,7 @@ export async function GET(req: NextRequest) {
   ]);
   const ok = checks.every((c) => c.ok);
 
-  return NextResponse.json(
-    {
+  return {
       ok,
       checks,
       config: {
@@ -239,7 +241,73 @@ export async function GET(req: NextRequest) {
           : "unreadable",
         tickBudgetMs: env.tickBudgetMs(),
       },
-    },
-    { status: ok ? 200 : 503 },
-  );
+  };
+}
+
+export async function GET(req: NextRequest) {
+  const secret = process.env.CRON_SECRET;
+  const auth = req.headers.get("authorization");
+  const qs = new URL(req.url).searchParams.get("secret");
+  if (!secret || (auth !== `Bearer ${secret}` && qs !== secret)) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
+  let routes;
+  try {
+    routes = allRoutes();
+  } catch (e) {
+    // A malformed CAMPAIGN_ROUTES stops the tick dead (routes.ts fails closed),
+    // so health must say so in the one place someone will look, rather than
+    // reporting on a fallback campaign that will never actually run.
+    return NextResponse.json(
+      { ok: false, checks: [{ name: "routes", ok: false, detail: (e as Error).message }] },
+      { status: 503 },
+    );
+  }
+
+  // Sequential, not Promise.all: each pass mutates the shared tab-override cache
+  // via loadTabOverrides(true), and the Sheets read budget is shared. Health is
+  // not on a hot path, and two campaigns racing to refresh the same cache is the
+  // kind of subtlety that only shows up under load.
+  const results = [];
+  for (const route of routes) {
+    const report = await withCampaign(route, () => inspectCampaign()).catch((e) => ({
+      ok: false,
+      checks: [{ name: "campaign", ok: false, detail: (e as Error).message.slice(0, 300) }],
+      config: null,
+    }));
+    results.push({ key: route.key, host: route.host, sheetId: route.sheetId, ...report });
+  }
+  const ok = results.every((r) => r.ok);
+
+  // Single-campaign deployments keep the exact response they had before routing
+  // existed — same top-level `checks` and `config` keys — so nothing that reads
+  // this endpoint has to know whether routing is switched on.
+  // What the proxy actually forwarded, and whether it matched a campaign.
+  //
+  // Host routing fails INVISIBLY when a reverse proxy rewrites Host to its
+  // upstream name ("app:3000"): every request then matches no route, the write
+  // paths 404 and the landing page silently falls back to the founder page.
+  // Nothing else in this response would show it, so it is reported outright —
+  // one curl after a deploy answers "is the proxy passing the real hostname".
+  const seenHost = hostOf(req);
+  const matched = routeForHost(seenHost);
+  const routing = {
+    hostSeen: seenHost || "(none)",
+    matchedCampaign: matched?.key ?? null,
+    configuredHosts: routes.map((r) => r.host),
+    ...(isMultiCampaign() && !matched
+      ? { warning: "Host matched no campaign — check the proxy forwards the original Host or X-Forwarded-Host." }
+      : {}),
+  };
+
+  let body: Record<string, unknown>;
+  if (isMultiCampaign()) {
+    body = { ok, routing, campaigns: results };
+  } else {
+    const { key, host, sheetId, ...single } = results[0];
+    body = { ...single, routing, ok };
+  }
+
+  return NextResponse.json(body, { status: ok ? 200 : 503 });
 }

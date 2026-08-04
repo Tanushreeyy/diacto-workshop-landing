@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { registerLead } from "@/lib/booking/service";
+import { withHost, hostOf, UnknownHostError } from "@/lib/booking/routes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,10 +49,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "bad_phone" }, { status: 400 });
   }
 
+  // WHICH CAMPAIGN. The host decides, because this is a WRITE: the founder page
+  // and the HR page are the same code on two subdomains, and resolving the sheet
+  // from a process-wide SHEET_ID is what put five founder-workshop visitors into
+  // the HR sheet with an HR Event Pass. An unrecognised host registers nobody.
   try {
-    const r = await registerLead(input);
-    return NextResponse.json(r, { status: r.ok ? 200 : 500 });
+    return await withHost(hostOf(req), async () => {
+      const r = await registerLead(input);
+      return NextResponse.json(r, { status: r.ok ? 200 : 500 });
+    });
   } catch (e) {
+    if (e instanceof UnknownHostError) {
+      console.error("[/api/register] unknown host", (e as Error).message);
+      return NextResponse.json({ ok: false, error: "unknown_campaign" }, { status: 404 });
+    }
     console.error("[/api/register]", e);
     return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
   }

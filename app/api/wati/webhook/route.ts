@@ -4,6 +4,7 @@ import { setOptOut } from "@/lib/booking/service";
 import { classifyInbound, STATUS, STATUS_SOURCE } from "@/lib/booking/config";
 import { phoneKey } from "@/lib/booking/phone";
 import { notifySlack } from "@/lib/booking/slack";
+import { allRoutes, isMultiCampaign, withCampaign } from "@/lib/booking/routes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,8 +66,36 @@ export async function POST(req: NextRequest) {
   const key = phoneKey(waId);
 
   let result;
+  // WHICH CAMPAIGN did this person reply to? Unlike every other entry point, the
+  // host cannot say: WATI is configured with ONE webhook URL for the whole
+  // WhatsApp number, and both campaigns send from that same number. So the only
+  // way to place a reply is to look for the phone in each campaign's sheet.
+  //
+  // First match wins and the search stops. A number that appears in both sheets
+  // is a real possibility (the same person can attend both workshops), and
+  // stopping both would silence a workshop they never replied about. Stopping
+  // the first is the conservative half of that choice, and the Slack notice names
+  // which campaign it was so a human can do the other one deliberately.
+  let matchedCampaign = "";
   try {
-    result = await setOptOut({ phoneKey: key }, reason, STATUS_SOURCE.reply);
+    for (const route of allRoutes()) {
+      const r = await withCampaign(route, () =>
+        setOptOut({ phoneKey: key }, reason, STATUS_SOURCE.reply),
+      );
+      if (r.found) {
+        result = r;
+        matchedCampaign = route.key;
+        break;
+      }
+      result = r; // keep the last not-found so the no-match path below still works
+    }
+    // allRoutes() is never empty (routes.ts refuses an empty array, and an unset
+    // CAMPAIGN_ROUTES yields the implicit single campaign), so the loop always
+    // assigns. Guarding anyway rather than asserting: a webhook that throws makes
+    // WATI retry for 24 hours.
+    if (!result) {
+      return NextResponse.json({ ok: true, ignored: "no_campaign_configured" });
+    }
   } catch (e) {
     // Never make WATI retry on our internal failure — log and 200.
     console.error("[wati/webhook] setOptOut failed:", e);
@@ -76,6 +105,9 @@ export async function POST(req: NextRequest) {
 
   const who = result.name || body.senderName || waId;
   const preview = (body.text || "").slice(0, 140).replace(/\n/g, " ");
+  // Named only when routing is on, so single-campaign Slack messages read
+  // exactly as they always have.
+  const where = isMultiCampaign() && matchedCampaign ? ` [${matchedCampaign}]` : "";
 
   if (!result.found) {
     // A message from someone not in our sheet — nothing to stop, but surface it.
@@ -85,18 +117,18 @@ export async function POST(req: NextRequest) {
 
   if (reason === STATUS.unsubscribed) {
     await notifySlack(
-      `:no_bell: *${who}* sent a STOP word on WhatsApp — *unsubscribed, all messages stopped*. Message: "${preview}"`,
+      `:no_bell: *${who}*${where} sent a STOP word on WhatsApp — *unsubscribed, all messages stopped*. Message: "${preview}"`,
     ).catch(() => {});
   } else {
     const note = result.alreadyOut
       ? `already opted out — left as-is`
       : `*all messages stopped* (they replied)`;
     await notifySlack(
-      `:speech_balloon: *${who}* replied on WhatsApp — ${note}. Message: "${preview}"`,
+      `:speech_balloon: *${who}*${where} replied on WhatsApp — ${note}. Message: "${preview}"`,
     ).catch(() => {});
   }
 
-  return NextResponse.json({ ok: true, matched: true, reason, alreadyOut: !!result.alreadyOut });
+  return NextResponse.json({ ok: true, matched: true, campaign: matchedCampaign || undefined, reason, alreadyOut: !!result.alreadyOut });
 }
 
 // A GET makes dashboard "test webhook" buttons and humans poking the URL get a

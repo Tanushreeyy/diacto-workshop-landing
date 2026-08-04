@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { EVENT } from "@/lib/event";
+import { EVENT } from "@/lib/hr/event";
 import type { LandingEvent } from "@/lib/landingEvent";
 
 export default function Footer({ ev }: { ev: LandingEvent }) {
@@ -16,22 +16,26 @@ export default function Footer({ ev }: { ev: LandingEvent }) {
           className="h-7 w-auto"
         />
 
-        <p className="font-sans text-xs text-white/60">
-          World-Class Data &amp; AI Solution Provider
+        <p className="font-sans text-sm text-white/80">
+          {EVENT.organiserShort}
         </p>
 
         <p className="font-sans text-xs text-white/60">
-          {ev.dayLabel} · {ev.timeLabel} ·{" "}
-          <a
-            href={EVENT.mapUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`Open ${ev.venue} in Google Maps`}
-            className="underline decoration-brand-gold/40 underline-offset-2 transition hover:text-white/90"
-          >
-            {ev.venue}
-          </a>
+          {EVENT.organiserTagline}
         </p>
+
+        <p className="font-sans text-xs text-white/60">
+          {ev.dayLabel} · {ev.timeLabel} · {ev.venue}
+        </p>
+
+        <a
+          href={EVENT.privacyPolicyUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-sans text-xs text-white/60 underline underline-offset-4 transition-colors hover:text-brand-gold"
+        >
+          Privacy Policy
+        </a>
 
         <p className="mt-1 font-sans text-xs text-white/40">
           Diacto © 2026 All Rights Reserved

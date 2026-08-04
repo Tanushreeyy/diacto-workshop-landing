@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lookupLead } from "@/lib/booking/service";
+import { withHost, hostOf, UnknownHostError } from "@/lib/booking/routes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,9 +20,17 @@ export async function POST(req: NextRequest) {
   if (!rid && !phone) {
     return NextResponse.json({ found: false, alreadyRegistered: false }, { status: 400 });
   }
+  // Scoped to the host's campaign so a prefill can only ever match someone in
+  // THIS campaign's sheet. Cross-campaign matching would quietly hand one
+  // workshop's registrant the other workshop's booking flow.
   try {
-    return NextResponse.json(await lookupLead({ rid, phone }));
+    return await withHost(hostOf(req), async () =>
+      NextResponse.json(await lookupLead({ rid, phone })),
+    );
   } catch (e) {
+    if (e instanceof UnknownHostError) {
+      return NextResponse.json({ found: false, alreadyRegistered: false }, { status: 404 });
+    }
     console.error("[/api/lookup]", e);
     return NextResponse.json({ found: false, alreadyRegistered: false }, { status: 500 });
   }

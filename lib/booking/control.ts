@@ -120,12 +120,25 @@ export async function readSwitches(): Promise<Switches> {
 // Fail-open, exactly like readSwitches: any read error leaves the last-known
 // overrides in place (env vars as the ultimate fallback), so a transient Sheets
 // blip never silently repoints a live campaign.
-let tabOverridesLoadedAt = 0;
+// Keyed by SHEET ID, like the overrides themselves.
+//
+// This was a single module-level timestamp, which was correct only while a
+// process served one campaign. With two, the first campaign's load would start
+// the window and the second's call — microseconds later in the same tick — would
+// see a fresh timestamp and return without ever reading ITS control tab. Its
+// overrides would stay empty and tabOverride() would fall through to the env
+// var, so campaign B would silently resolve campaign-A-shaped tab names.
+//
+// The values were already parked per sheet (see tabOverrides.ts). Only the
+// freshness check was global, which made the per-sheet parking useless in the
+// one situation it was written for.
+const tabOverridesLoadedAt = new Map<string, number>();
 const TAB_OVERRIDES_TTL_MS = 30_000;
 
 export async function loadTabOverrides(force = false): Promise<void> {
   const now = Date.now();
-  if (!force && now - tabOverridesLoadedAt < TAB_OVERRIDES_TTL_MS) return;
+  const sheetId = env.sheetId();
+  if (!force && now - (tabOverridesLoadedAt.get(sheetId) ?? 0) < TAB_OVERRIDES_TTL_MS) return;
   let table;
   try {
     table = await readTable(env.controlTab());
@@ -146,8 +159,8 @@ export async function loadTabOverrides(force = false): Promise<void> {
   }
   // Parked against the sheet they came from, so a second campaign in the same
   // process cannot overwrite the first's tab names (see tabOverrides.ts).
-  setTabOverrides(next, env.sheetId());
-  tabOverridesLoadedAt = now;
+  setTabOverrides(next, sheetId);
+  tabOverridesLoadedAt.set(sheetId, now);
 }
 
 // ---- header baseline -------------------------------------------------------

@@ -2,10 +2,18 @@
 
 Every campaign is driven from one tab in its own spreadsheet. This is the tab.
 
-The design in one line: **env holds secrets and a single pointer (`SHEET_ID`);
-the sheet holds the campaign; code holds flow behaviour.** Running next week's
-workshop is a new sheet plus one env var — everything below is changed by ops,
-in the sheet, with **no deploy and no developer**.
+The design in one line: **env holds secrets and a pointer to each campaign's
+sheet; the sheet holds the campaign; code holds flow behaviour.** Running next
+week's workshop is a new sheet plus one env entry — everything below is changed
+by ops, in the sheet, with **no deploy and no developer**.
+
+> **Two campaigns at once.** When more than one workshop is live, the pointer is
+> `CAMPAIGN_ROUTES` rather than `SHEET_ID`, and the **host** decides which
+> campaign a visitor or a lead belongs to — see `.env.example`. Each campaign
+> then has **its own control tab in its own spreadsheet**, and everything in this
+> document applies to each of them separately. A switch flipped in one campaign's
+> control tab has no effect on the other; the same is true of the flow, the
+> templates and the reminder times. There is no shared or global control tab.
 
 Changes land on the **next tick, within 5 minutes** (`docker-compose.yml`, the
 `cron` service ticks every 300s). Nothing is cached beyond that.

@@ -53,6 +53,46 @@ export const WA_TEMPLATES = {
 // is approved and before the new form's extra fields (years in business, etc.) exist.
 export const WA_LEAD_ALERT_TEMPLATE = opt("WATI_TPL_LEAD_ALERT", "wa_lead_alert");
 
+/** A field an ops-alert template can carry, in the order the template expects. */
+export type LeadAlertField =
+  | "campaign"
+  | "name"
+  | "phone"
+  | "email"
+  | "company"
+  | "designation"
+  | "employeeCount"
+  | "location"
+  | "years";
+
+/**
+ * Which body params the configured alert template expects.
+ *
+ * ONE definition, used by the sender AND by the pre-flight check. It used to be
+ * an inline `template.includes("full") ? 7 : 2` in both places, and duplicated
+ * logic like that is how necessity-check came to disagree with ingest about the
+ * form columns. WATI rejects a send whose param count differs from the approved
+ * template, so a checker that can be wrong here is worse than none.
+ *
+ * Adding a template means adding a branch. The fallback is the 2-field safeproof
+ * because name and phone are the only two values a lead ALWAYS has — an unknown
+ * template sending too few params fails loudly at WATI, whereas guessing high
+ * would fail just as hard while looking deliberate.
+ */
+export function leadAlertFields(template: string): readonly LeadAlertField[] {
+  // Names the campaign in the message. Both workshops alert the same ops number,
+  // and the previous templates hardcoded "Business Transformation Blueprint" —
+  // so every HR lead alert named the wrong workshop, and once the two campaigns
+  // run in parallel an SDR cannot tell which one to pitch.
+  if (template.includes("campaign")) {
+    return ["campaign", "name", "phone", "email", "company", "designation", "employeeCount", "location", "years"];
+  }
+  if (template.includes("full")) {
+    return ["name", "phone", "email", "location", "designation", "years", "employeeCount"];
+  }
+  return ["name", "phone"];
+}
+
 // Nurture ladder for leads who haven't finished registering:
 // WA-2 (touch 1) → WA-3 (touch 2) → WA-4 (repeats twice daily until registered).
 export const WA_NURTURE_LADDER = [

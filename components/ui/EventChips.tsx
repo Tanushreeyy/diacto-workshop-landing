@@ -1,4 +1,5 @@
 import { EVENT } from "@/lib/event";
+import type { LandingEvent } from "@/lib/landingEvent";
 
 /**
  * Event details row shared by Hero and FinalCTA — three pill chips (day, time,
@@ -6,19 +7,22 @@ import { EVENT } from "@/lib/event";
  * white text on subtle white/5 rounded-full chips.
  */
 export default function EventChips({
+  ev,
   className = "",
   align = "center",
 }: {
+  /** Date/time/venue for the campaign this host serves — see lib/landingEvent.ts. */
+  ev: LandingEvent;
   className?: string;
   /** "center" keeps chips centered. "left" centers on mobile but left-aligns
    *  from lg up (to line up with a left-aligned column). */
   align?: "center" | "left";
 }) {
   const chips = [
-    { icon: CalendarIcon, label: EVENT.dayLabel },
-    { icon: ClockIcon, label: EVENT.timeLabel },
+    { icon: CalendarIcon, label: ev.dayLabel },
+    { icon: ClockIcon, label: ev.timeLabel },
     // The venue chip links to Google Maps so a lead can open directions in one tap.
-    { icon: PinIcon, label: EVENT.venue, href: EVENT.mapUrl },
+    { icon: PinIcon, label: ev.venue, href: ev.mapUrl ?? EVENT.mapUrl },
   ];
 
   const justify =

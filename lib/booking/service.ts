@@ -24,6 +24,8 @@ import {
   StatusSource,
   policyFor,
   outranks,
+  leadAlertFields,
+  LeadAlertField,
 } from "./config";
 import {
   loadCampaign,
@@ -411,7 +413,7 @@ export async function registerLead(input: RegistrationInput): Promise<RegisterRe
   // used different dates or a different template from the tick's reminders would
   // be worse than one that failed.
   const c = await loadCampaign();
-  return withSheetLock("registerLead", () => registerLeadLocked(c, input));
+  return withSheetLock("registerLead", () => registerLeadLocked(c, input), env.sheetId());
 }
 
 async function registerLeadLocked(
@@ -622,7 +624,7 @@ async function ingestLead(
       [A.lastNudge]: nowIso(),
     });
     return true;
-  });
+  }, env.sheetId());
   if (!didAppend) return; // already present — nothing sent
 
   // ── sdr_assisted: confirmation + Event Pass, right now. ──
@@ -649,7 +651,7 @@ async function ingestLead(
         const fresh = await readTable(env.autoTab());
         const mine = fresh.rows.find((x) => cell(fresh, x, A.token) === token);
         if (mine) await updateRow(fresh, mine.rowNumber, { [A.passSent]: nowIso() });
-      });
+      }, env.sheetId());
     }
     await notifySlack(
       `:inbox_tray: *New lead — registered on submission* (${c.label})\n` +
@@ -755,23 +757,24 @@ async function alertOpsNewLead(c: Campaign, l: FormLead, e164: string): Promise<
   // every value is squashed to a single line and falls back to "—" when the lead
   // left it blank or the form tab lacks that column (older forms have no years/loc).
   const v = (x: string) => (x || "").replace(/\s+/g, " ").trim() || "—";
-  // The full template (wa_lead_alert_full) carries all seven instant-form fields;
-  // the 2-field safeproof (wa_lead_alert) only ever needs name + phone. Match the
-  // param count to whichever is configured so we never over/under-fill.
-  const parameters = template.includes("full")
-    ? [
-        { name: "1", value: v(l.name) },
-        { name: "2", value: v(e164 || l.phone) },
-        { name: "3", value: v(l.email) },
-        { name: "4", value: v(l.location) },
-        { name: "5", value: v(l.designation) },
-        { name: "6", value: v(l.years) },
-        { name: "7", value: v(l.employeeCount) },
-      ]
-    : [
-        { name: "1", value: v(l.name) },
-        { name: "2", value: v(e164 || l.phone) },
-      ];
+  // Which fields, and in what order, comes from leadAlertFields() — the same
+  // function the pre-flight check uses, so the two can never disagree about a
+  // param count that WATI will reject outright.
+  const value: Record<LeadAlertField, string> = {
+    campaign: c.label,
+    name: l.name,
+    phone: e164 || l.phone,
+    email: l.email,
+    company: l.company,
+    designation: l.designation,
+    employeeCount: l.employeeCount,
+    location: l.location,
+    years: l.years,
+  };
+  const parameters = leadAlertFields(template).map((f, i) => ({
+    name: String(i + 1),
+    value: v(value[f]),
+  }));
   for (const number of numbers) {
     try {
       await sendTemplate({ whatsappNumber: number, templateName: template, parameters });
@@ -1579,7 +1582,7 @@ export async function setOptOut(
     }
     await updateRow(auto, row.rowNumber, fields);
     return { ok: true, found: true, name, reason };
-  });
+  }, env.sheetId());
 }
 
 // Clear a lead's opt-out (resubscribe). Reminders they are still eligible for
@@ -1599,7 +1602,7 @@ export async function clearOptOut(token: string): Promise<OptOutResult> {
       [A.statusSource]: "",
     });
     return { ok: true, found: true, name };
-  });
+  }, env.sheetId());
 }
 
 export function optOutStateForToken(auto: Table, token: string): {
@@ -1711,5 +1714,5 @@ export async function reconcileDuplicates(): Promise<{ retired: number; groups: 
       }
     }
     return { retired, groups };
-  });
+  }, env.sheetId());
 }
