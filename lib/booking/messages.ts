@@ -1,4 +1,4 @@
-import { WORKSHOP } from "./config";
+import { WORKSHOP, DEMO_VIDEO_URL } from "./config";
 // Message content: renders the designed email templates + maps WhatsApp
 // template variables. Email HTML/subjects live in email-templates/*.html and are
 // bundled into emailTemplates.ts via `npm run build-emails`.
@@ -21,6 +21,8 @@ export interface MsgCtx {
   venue: string;
   mapUrl: string;
   support: string;
+  /** lead_capture: the product demo. Blank for the workshop flows. */
+  demoVideoUrl?: string;
 }
 
 // Fallback only. Real emails carry a per-lead tokenised link (ctx.unsubscribeUrl)
@@ -46,6 +48,10 @@ export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: 
     // postponement is one env var across WhatsApp, the landing page AND the emails.
     Event_Date: ctx.dateLabel,
     Event_Date_Short: ctx.dateShort,
+    // EM-10 (lead_capture) only. Falls back to the configured default rather than
+    // to "" — an empty href would render the acknowledgement's one CTA as a
+    // button that goes nowhere.
+    Demo_Video_Link: ctx.demoVideoUrl || DEMO_VIDEO_URL,
   };
   const fill = (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
   return { subject: fill(tpl.subject), html: fill(tpl.html) };
@@ -69,10 +75,21 @@ export function emailFor(kind: EmailKey, ctx: MsgCtx): { subject: string; html: 
  *
  * The caller always knows which rung it is sending. So it says so.
  */
-export type WaRole = "wa1" | "wa2" | "wa3" | "wa4" | "wa5" | "wa6" | "wa7" | "wa8";
+export type WaRole =
+  | "wa1" | "wa2" | "wa3" | "wa4" | "wa5" | "wa6" | "wa7" | "wa8"
+  // lead_capture's single acknowledgement. Outside the ladder on purpose — it is
+  // not rung 9 of anything, and it carries neither a date nor a pass.
+  | "lead";
 
 export function waParamsFor(role: WaRole, ctx: MsgCtx): WaParam[] {
   const fn: WaParam = { name: "1", value: ctx.firstName };
+
+  // lead_capture: {{1}} first name · {{2}} demo video link. No date and no pass,
+  // because this campaign has no event and issues no pass.
+  if (role === "lead") {
+    return [fn, { name: "2", value: ctx.demoVideoUrl || DEMO_VIDEO_URL }];
+  }
+
   // WA-1..4 (not yet registered) point at the registration link;
   // WA-5..8 (registered) point at the Event Pass download.
   const isPreRegistration = role === "wa1" || role === "wa2" || role === "wa3" || role === "wa4";

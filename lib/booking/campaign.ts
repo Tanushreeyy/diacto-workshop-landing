@@ -27,11 +27,11 @@
 
 import { readTable, resolveHeader, cell } from "./google";
 import { env } from "./env";
-import { WORKSHOP, WA_TEMPLATES, WA_LEAD_ALERT_TEMPLATE, ReminderSpec } from "./config";
+import { WORKSHOP, WA_TEMPLATES, WA_LEAD_ALERT_TEMPLATE, DEMO_VIDEO_URL, ReminderSpec } from "./config";
 
 // ---- flow -------------------------------------------------------------------
 //
-// The two shapes a campaign can take. This is the difference that a pile of
+// The three shapes a campaign can take. This is the difference that a pile of
 // switches cannot express, because it is about WHEN things happen, not whether.
 //
 //   self_serve   — the lead confirms themselves. Ingest sends a booking link, the
@@ -45,10 +45,24 @@ import { WORKSHOP, WA_TEMPLATES, WA_LEAD_ALERT_TEMPLATE, ReminderSpec } from "./
 //                  client's team) confirm attendance by phone. The landing page is
 //                  out of the funnel entirely. (HR Workshop, Aug 2026.)
 //
-// Reminders are the SAME in both: day before, morning of, two hours before. The
-// flow decides what happens at ingest and whether anyone gets chased — not what
-// happens on event day.
-export const FLOWS = ["self_serve", "sdr_assisted"] as const;
+//   lead_capture — there is no event. The Meta form is a SALES ENQUIRY: ingest
+//                  sends one acknowledgement (WhatsApp + email) carrying the
+//                  product demo, and the sales team calls. No booking link, no
+//                  Event Pass, no ladder, no reminders — the row exists so the
+//                  team has the lead and so the person is never messaged twice.
+//                  (CandidHR lead generation, Aug 2026.)
+//
+// Reminders are the SAME in the two workshop flows: day before, morning of, two
+// hours before. The flow decides what happens at ingest and whether anyone gets
+// chased — not what happens on event day. lead_capture has no event day at all,
+// which is why it is a flow and not a switch: every other setting in this file
+// assumes a date exists.
+export const FLOWS = ["self_serve", "sdr_assisted", "lead_capture"] as const;
+
+/** True when this campaign has an event — a date, a venue, a pass, reminders. */
+export function hasEvent(c: { flow: Flow }): boolean {
+  return c.flow !== "lead_capture";
+}
 export type Flow = (typeof FLOWS)[number];
 
 export interface CampaignEvent {
@@ -100,7 +114,20 @@ export interface Campaign {
     wa1: string; wa2: string; wa3: string; wa4: string;
     wa5: string; wa6: string; wa7: string; wa8: string;
     leadAlert: string;
+    /** lead_capture's single acknowledgement. Blank in the workshop flows. */
+    leadFollowup: string;
   };
+  /** Product demo linked from the lead_capture acknowledgement. */
+  demoVideoUrl: string;
+  /**
+   * The number a recipient can call back on, printed in the email footer.
+   *
+   * Per-campaign because one deployment now serves three campaigns off one
+   * SUPPORT_NUMBER: a CandidHR lead who taps the footer reaches the workshop
+   * support line, where nobody knows what CandidHR is. Falls back to
+   * WORKSHOP.supportNumber, so the two workshop sheets need no change.
+   */
+  supportNumber: string;
   reminders: ReminderSpec[];
   /**
    * True when the control tab actually describes this campaign, false for a
@@ -164,6 +191,26 @@ export function campaignProblems(c: Campaign): string[] {
   if (!(FLOWS as readonly string[]).includes(c.flow)) {
     p.push(`flow '${c.flow}' is not one of: ${FLOWS.join(", ")}`);
   }
+  // lead_capture has no event, so every event field below is meaningless to it —
+  // and REQUIRING them would be worse than pointless. The date they would be
+  // filled with is a fiction, and a fiction in event_date_short is a date that
+  // rides into a message as {{2}}. Its own two requirements are checked instead.
+  if (c.flow === "lead_capture") {
+    if (!c.templates.leadFollowup.trim()) {
+      p.push(
+        `flow is lead_capture but tpl_wa_lead_followup is blank — the acknowledgement ` +
+          `is the only message this campaign sends, so nothing would reach the lead`,
+      );
+    }
+    if (!c.demoVideoUrl.trim()) {
+      p.push(
+        `flow is lead_capture but demo_video_url is blank — it rides as {{2}} in the ` +
+          `WhatsApp template, and Meta rejects a send with an empty body parameter`,
+      );
+    }
+    return p;
+  }
+
   if (!c.event.startUtc || Number.isNaN(c.event.startMs)) {
     p.push(`event_start_utc '${c.event.startUtc}' is missing or not a valid ISO timestamp`);
   }
@@ -175,8 +222,8 @@ export function campaignProblems(c: Campaign): string[] {
   })) {
     if (!String(v).trim()) p.push(`${k} is blank`);
   }
-  // The confirmation is the one message EVERY flow sends, so a blank name here
-  // means the campaign cannot do its job at all.
+  // The confirmation is the one message BOTH workshop flows send, so a blank name
+  // here means the campaign cannot do its job at all.
   if (!c.templates.wa5.trim()) p.push(`tpl_wa_confirmation is blank`);
   if (c.flow === "self_serve" && !c.templates.wa1.trim()) {
     p.push(`flow is self_serve but tpl_wa_booking_pending is blank — nothing would ` +
@@ -220,6 +267,14 @@ export function campaignProblems(c: Campaign): string[] {
  * from the event itself rather than a flag somebody has to remember to set.
  */
 export function hasEnded(c: Campaign, now: number = Date.now()): boolean {
+  // A lead_capture campaign has no event, so it has no end. Without this it
+  // would have exactly one: event_start_utc is blank on such a sheet, so it
+  // resolves to the WORKSHOP default — a date that is already in the past. The
+  // auto-stop would then fire on the very first tick and halt SILENTLY, because
+  // this stop is deliberately quiet (it is the normal end of a workshop). The
+  // campaign would look configured, healthy and live, and would never ingest a
+  // single lead or say why. It ends when somebody pauses the ad.
+  if (!hasEvent(c)) return false;
   return Number.isFinite(c.event.startMs) && now >= c.event.startMs;
 }
 
@@ -292,6 +347,7 @@ export async function loadCampaign(): Promise<Campaign> {
   const tpl = (key: string, legacyDefault: string) =>
     hasCampaignRows ? (map.get(key) || "").trim() : get(key, legacyDefault);
 
+  const flow = get("flow", "self_serve") as Flow;
   const startUtc = get("event_start_utc", WORKSHOP.eventStartUtc);
   const startMs = Date.parse(startUtc);
   const offsets = map.get("reminder_offsets_hours")
@@ -301,7 +357,7 @@ export async function loadCampaign(): Promise<Campaign> {
   return {
     id: get("campaign_id", get("reg_id_prefix", WORKSHOP.regIdPrefix).toLowerCase()),
     label: get("campaign_label", WORKSHOP.dateLabel),
-    flow: get("flow", "self_serve") as Flow,
+    flow,
     event: {
       regIdPrefix: get("reg_id_prefix", WORKSHOP.regIdPrefix),
       mmdd: mmddIst(startMs) || WORKSHOP.eventMMDD,
@@ -334,8 +390,19 @@ export async function loadCampaign(): Promise<Campaign> {
       wa7: tpl("tpl_wa_morning_of", WA_TEMPLATES.WA7),
       wa8: tpl("tpl_wa_two_hour", WA_TEMPLATES.WA8),
       leadAlert: tpl("tpl_wa_lead_alert", WA_LEAD_ALERT_TEMPLATE),
+      leadFollowup: tpl("tpl_wa_lead_followup", WA_TEMPLATES.LEAD),
     },
-    reminders: Number.isFinite(startMs) ? remindersFor(startMs, offsets) : [],
+    demoVideoUrl: get("demo_video_url", DEMO_VIDEO_URL),
+    supportNumber: get("support_number", WORKSHOP.supportNumber),
+    // A lead_capture campaign gets NO reminder schedule, even though startUtc
+    // above resolved to something finite. It resolved to the workshop default,
+    // because a sheet with no event leaves event_start_utc blank — and a finite
+    // default is exactly what would build three reminders for an event that does
+    // not exist and fire them at whoever the sales team had not yet called.
+    reminders:
+      flow !== "lead_capture" && Number.isFinite(startMs)
+        ? remindersFor(startMs, offsets)
+        : [],
     managed: hasCampaignRows,
     source,
   };
@@ -343,6 +410,13 @@ export async function loadCampaign(): Promise<Campaign> {
 
 /** One-line description for Slack and /api/health. */
 export function describeCampaign(c: Campaign): string {
+  // A lead_capture campaign has no date, no start and no reminders. Printing the
+  // inherited workshop defaults for them would put a stale event date into every
+  // Slack line and /api/health payload — the exact confusion this line exists to
+  // prevent.
+  if (!hasEvent(c)) {
+    return `${c.label} [${c.flow}] · no event · tpl ${c.templates.leadFollowup || "(unset)"} · ${c.source}`;
+  }
   return (
     `${c.label} [${c.flow}] · ${c.event.dateShort} · start ${c.event.startUtc} · ` +
     `${c.reminders.length} reminder(s) · ${c.source}`

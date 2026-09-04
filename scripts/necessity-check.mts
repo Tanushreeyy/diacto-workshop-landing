@@ -49,11 +49,16 @@ const sw = await readSwitches();
 console.log(`  ..... switches: ${JSON.stringify(sw)}`);
 if (!sw.ingest) NEED("ingest_enabled is FALSE — new leads will not be picked up");
 else ok("ingest_enabled TRUE");
-if (!sw.reminders) NEED("reminders_enabled is FALSE — nothing goes out on the day");
+// lead_capture has no day for anything to go out on, so the reminder switch is
+// not a blocker there — it is simply not consulted.
+if (c.flow === "lead_capture") ok("reminders not used by this flow");
+else if (!sw.reminders) NEED("reminders_enabled is FALSE — nothing goes out on the day");
 else ok("reminders_enabled TRUE");
 if (!sw.email) WARN("email_enabled FALSE");
 if (!sw.whatsapp) WARN("whatsapp_enabled FALSE");
 // nurture is flow-dependent, not universally required.
+if (c.flow === "lead_capture" && sw.nurture)
+  WARN("nurture_enabled TRUE on a lead_capture flow — there is no ladder to run, but the switch misleads");
 if (c.flow === "sdr_assisted" && sw.nurture)
   WARN("nurture_enabled TRUE on an sdr_assisted flow — the ladder is skipped anyway, but the switch misleads");
 if (c.flow === "self_serve" && !sw.nurture)
@@ -76,9 +81,13 @@ for (let p = 1; p <= 20; p++) {
 }
 
 // sdr_assisted registers at ingest, so the booking ladder (wa1-wa4) is never sent.
-const usedRoles = c.flow === "sdr_assisted"
-  ? ["wa5", "wa6", "wa7", "wa8"]
-  : ["wa1", "wa2", "wa3", "wa4", "wa5", "wa6", "wa7", "wa8"];
+// lead_capture sends exactly one, and none of the ladder.
+const usedRoles =
+  c.flow === "lead_capture"
+    ? ["leadFollowup"]
+    : c.flow === "sdr_assisted"
+      ? ["wa5", "wa6", "wa7", "wa8"]
+      : ["wa1", "wa2", "wa3", "wa4", "wa5", "wa6", "wa7", "wa8"];
 const unusedRoles = (["wa1", "wa2", "wa3", "wa4", "wa5", "wa6", "wa7", "wa8"] as const)
   .filter((r) => !usedRoles.includes(r));
 
@@ -170,8 +179,10 @@ const ctx = {
   dateLabel: c.event.dateLabel, dateShort: c.event.dateShort, timeLabel: c.event.timeLabel,
   venue: c.event.venue, mapUrl: c.event.mapUrl, support: "7387731069",
   unsubscribeLink: "https://x/api/unsubscribe?rid=T",
+  demoVideoUrl: c.demoVideoUrl,
 };
-for (const kind of ["EM5", "EM6", "EM7", "EM8"]) {
+const usedEmails = c.flow === "lead_capture" ? ["EM10"] : ["EM5", "EM6", "EM7", "EM8"];
+for (const kind of usedEmails) {
   try {
     const { subject, html } = emailFor(kind as any, ctx as any);
     const leftovers = [...html.matchAll(/\{\{\s*([\w ]+)\s*\}\}/g)].map((m) => m[1]);

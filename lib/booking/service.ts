@@ -83,6 +83,13 @@ const A = {
   location: "location",
   employeeCount: "employee_count",
   years: "years_in_business",
+  // The three CandidHR qualifiers. Written at ingest and never touched again —
+  // they exist so a salesperson can sort the call list by who can actually buy
+  // and who is ready to. Not in preflight's REQUIRED list: a workshop sheet has
+  // no such columns and must keep running without them.
+  authority: "decision_authority",
+  timeline: "automation_timeline",
+  screeningTool: "current_screening_tool",
   phone: "phone",
   phoneKey: "phone_key",
   email: "email",
@@ -150,6 +157,10 @@ export const FORM = {
     "organization_name",
     "organisation_name",
     "enter_your_company_name",
+    // CandidHR's Instant Form phrases it "name_of_company". Verified against the
+    // live LeadsSheet_New header — without this the only company-shaped field on
+    // a lead_capture row is blank, and the SDR gets a call list of bare names.
+    "name_of_company",
   ],
   employeeCount: [
     "no_of_employees",
@@ -178,7 +189,111 @@ export const FORM = {
     "years_in_operation",
     "business_age",
   ],
+
+  // Which creative produced the lead. Four are running on the CandidHR campaign
+  // (FC_Static1/2, FC_Video1/2) and nothing downstream records which one
+  // converted, so "which creative should we scale?" can only be answered in Ads
+  // Manager, unjoined to what the SDR found on the call. Folded into the
+  // existing `source` column rather than a new one — see the append below.
+  adName: ["ad_name", "adname", "ad"],
+
+  // ── The three CandidHR qualifiers (lead_capture) ──
+  //
+  // These are the whole reason that form is ten questions long: the client
+  // accepted a lower lead volume and a higher cost per lead to get authority,
+  // timeline and current tooling before the first call. If a column fails to
+  // resolve the answer is simply GONE — lead_capture has no landing page to ask
+  // again on — so each lists every phrasing the form might ship with, exactly as
+  // the HR qualifiers had to after all four of theirs missed.
+  authority: [
+    "are_you_involved_in_selecting_or_purchasing_recruitment/hiring_technology",
+    "are_you_involved_in_selecting_or_purchasing_recruitment_hiring_technology",
+    "are_you_involved_in_selecting_or_purchasing_recruitment_technology",
+    "decision_authority",
+    "authority",
+  ],
+  timeline: [
+    "when_are_you_looking_to_automate_your_recruitment_process",
+    "when_are_you_looking_to_automate_your_recruitment",
+    "automation_timeline",
+    "timeline",
+  ],
+  screeningTool: [
+    "what_are_you_currently_using_for_candidate_screening",
+    "what_do_you_currently_use_for_candidate_screening",
+    "current_screening_tool",
+    "screening_tool",
+  ],
 };
+
+// Meta writes the SLUG of a multiple-choice answer, not the label the person saw:
+// "i_make_the_decision", "_ceo_/_founder_/_managing_director", "less_than_20".
+// Left alone those land in the sheet and, worse, in the Slack line an SDR reads
+// before dialling — "Buying role: *i_make_the_decision*" is the qualifier we
+// traded lead volume for, rendered as a database key.
+//
+// Sentence case per "/"-separated segment rather than title case, because these
+// values are two different shapes: role lists ("ceo / founder / managing
+// director") want each segment capitalised, sentences ("i make the decision",
+// "less than 20") want only the first word. Segment-wise sentence case is the
+// one rule that reads correctly for both.
+//
+// Applied to CHOICE fields only. Free text — name, company, city — is left
+// exactly as typed; "correcting" somebody's company name is not ours to do.
+const ACRONYMS = new Set([
+  "ceo", "cto", "coo", "cfo", "chro", "hr", "ta", "ats", "hrms", "crm", "ai", "it", "bpo", "sme",
+]);
+const PROPER: Record<string, string> = {
+  google: "Google",
+  excel: "Excel",
+  linkedin: "LinkedIn",
+  naukri: "Naukri",
+  sheets: "Sheets",
+  indeed: "Indeed",
+  candidhr: "CandidHR",
+};
+
+export function prettyChoice(raw: string): string {
+  const v = (raw || "").trim();
+  if (!v) return "";
+  // Anything that is not a Meta slug — free text, an already-clean label, a
+  // number — is returned untouched. Slugs are lowercase words joined by
+  // underscores; a value with spaces or capitals is somebody's own writing.
+  if (/[A-Z]/.test(v) || /\s/.test(v)) return v;
+  // Anything that looks like an address, a URL or an id is data, not a label.
+  // Belt and braces: this is only ever called on choice fields, but a form that
+  // one day offers "other — please specify" would put free text through here.
+  if (/[@:]|\.[a-z]/i.test(v)) return v;
+  if (!v.includes("_")) {
+    const one = v.toLowerCase();
+    if (ACRONYMS.has(one)) return one.toUpperCase();
+    return PROPER[one] ?? one.charAt(0).toUpperCase() + one.slice(1);
+  }
+  return v
+    .split("/")
+    .map((segment) => {
+      const words = segment
+        .replace(/_/g, " ")
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((w) => {
+          const lower = w.toLowerCase();
+          if (ACRONYMS.has(lower)) return lower.toUpperCase();
+          return PROPER[lower] ?? lower;
+        });
+      if (!words.length) return "";
+      // Capitalise the segment's first word unless it is already an acronym or a
+      // known proper noun, both of which carry their own casing.
+      const first = words[0];
+      if (first === first.toUpperCase() && first.length <= 5) return words.join(" ");
+      if (Object.values(PROPER).includes(first)) return words.join(" ");
+      words[0] = first.charAt(0).toUpperCase() + first.slice(1);
+      return words.join(" ");
+    })
+    .filter(Boolean)
+    .join(" / ");
+}
 
 const isDone = (v: string) => (v || "").trim().toUpperCase() === "TRUE";
 
@@ -248,7 +363,10 @@ function ctxFor(c: Campaign, name: string, token: string, regId?: string): MsgCt
     timeLabel: c.event.timeLabel,
     venue: c.event.venue,
     mapUrl: c.event.mapUrl,
-    support: WORKSHOP.supportNumber,
+    support: c.supportNumber,
+    // lead_capture only — WA {{2}} and the EM-10 CTA. Harmless on the workshop
+    // flows, whose templates never reference it.
+    demoVideoUrl: c.demoVideoUrl,
   };
 }
 
@@ -261,7 +379,7 @@ function passDataFor(c: Campaign, name: string, company: string, regId: string) 
     dateLabel: c.event.dateLabel,
     timeLabel: c.event.timeLabel,
     venue: c.event.venue,
-    support: WORKSHOP.supportNumber,
+    support: c.supportNumber,
     // undefined, not "", so pass.ts falls back to its literal for any cell the
     // control tab leaves blank. Passing "" would draw an empty line instead.
     ...Object.fromEntries(
@@ -549,6 +667,12 @@ interface FormLead {
   employeeCount: string;
   location: string;
   years: string;
+  // lead_capture only; blank on every workshop form.
+  authority: string;
+  timeline: string;
+  screeningTool: string;
+  /** lead_capture only: the Meta ad that produced this lead. */
+  adName: string;
 }
 
 async function ingestLead(
@@ -576,6 +700,32 @@ async function ingestLead(
   //                So the row is born registered, gets its reg ID immediately, and
   //                the confirmation + Event Pass go out at once.
   const isSdrAssisted = c.flow === "sdr_assisted";
+  //
+  // lead_capture   — arriving on the form is a SALES ENQUIRY and nothing more.
+  //                  There is no event to register for, so there is no reg ID, no
+  //                  Event Pass and no ladder. One acknowledgement goes out now,
+  //                  the row is closed to further automation, and the sales team
+  //                  calls. (CandidHR lead generation.)
+  const isLeadCapture = c.flow === "lead_capture";
+
+  // Meta's answer slugs become readable BEFORE anything is written or sent, so
+  // the sheet, the Slack ping and the ops alert all carry the same clean value —
+  // one normalisation point rather than three that can drift.
+  //
+  // lead_capture only, deliberately. The workshop forms carry the same slug
+  // shapes, but their designation and team-size values are also prefilled into
+  // the landing page form, and quietly changing what that field contains is not
+  // a change to make to two live campaigns from inside an unrelated one.
+  if (isLeadCapture) {
+    l = {
+      ...l,
+      designation: prettyChoice(l.designation),
+      employeeCount: prettyChoice(l.employeeCount),
+      authority: prettyChoice(l.authority),
+      timeline: prettyChoice(l.timeline),
+      screeningTool: prettyChoice(l.screeningTool),
+    };
+  }
   const regId = isSdrAssisted ? genRegId(c) : "";
 
   // The append runs under the lock AND re-checks dedupe against a fresh read
@@ -592,7 +742,10 @@ async function ingestLead(
     if (seen) return false;
     await appendRow(fresh, {
       [A.leadId]: l.leadId,
-      [A.source]: "meta_form",
+      // The ad name rides in `source` rather than a column of its own: `source`
+      // is written and never parsed anywhere, so enriching it costs no schema
+      // change on the two live workshop sheets.
+      [A.source]: isLeadCapture && l.adName ? `meta_form:${l.adName}` : "meta_form",
       [A.createdAt]: nowIso(),
       [A.name]: l.name,
       // Present only on the v3 form; blank from the older one, and then asked for
@@ -602,6 +755,17 @@ async function ingestLead(
       [A.employeeCount]: l.employeeCount,
       [A.location]: l.location,
       [A.years]: l.years,
+      // Spread, not three plain keys, and that is load-bearing: appendRow THROWS
+      // on a key with no matching header. A workshop sheet has no qualifier
+      // columns, so writing them unconditionally would fail every ingest on both
+      // live campaigns the moment this shipped.
+      ...(isLeadCapture
+        ? {
+            [A.authority]: l.authority,
+            [A.timeline]: l.timeline,
+            [A.screeningTool]: l.screeningTool,
+          }
+        : {}),
       [A.phone]: e164,
       [A.phoneKey]: key,
       [A.email]: l.email,
@@ -614,18 +778,94 @@ async function ingestLead(
       // complete. This is also what makes the reminders apply to them — they are
       // sent to registered rows — and what keeps the nurture ladder off their back.
       [A.regId]: regId,
-      [A.done]: isSdrAssisted ? "TRUE" : "",
+      // done closes a row to further automation. sdr_assisted sets it because the
+      // submission IS the registration; lead_capture sets it because there is
+      // nothing further to automate at all — the acknowledgement below is the
+      // whole campaign, and the next contact is a human on the phone.
+      [A.done]: isSdrAssisted || isLeadCapture ? "TRUE" : "",
+      // …but registered_at stays blank for lead_capture. Nobody registered for
+      // anything, and stamping it would put a registration count into every
+      // report for a campaign that has no event to attend.
       [A.registeredAt]: isSdrAssisted ? nowIso() : "",
       // The promo ledger counts PROMOTIONAL touches. self_serve's WA-1 is one — it
       // is chasing a booking. sdr_assisted's confirmation is transactional, exactly
       // like the Event Pass, so it must not consume someone's daily allowance.
-      [A.promoToday]: isSdrAssisted ? "0" : "1",
+      // Same exemption as sdr_assisted's confirmation, for the same reason: this
+      // acknowledges something the person just did and names who will call them.
+      // It is submitted to Meta as UTILITY, and counting it against a marketing
+      // allowance would be counting a receipt as an advert.
+      [A.promoToday]: isSdrAssisted || isLeadCapture ? "0" : "1",
       [A.promoDay]: istDay(),
       [A.lastNudge]: nowIso(),
     });
     return true;
   }, env.sheetId());
   if (!didAppend) return; // already present — nothing sent
+
+  // ── lead_capture: one acknowledgement, then humans. ──
+  //
+  // Deliberately BEFORE the promo-limit gate below, on the same reasoning as the
+  // sdr_assisted confirmation: this is the receipt for something the person just
+  // submitted, and withholding it to stay under a marketing quota would leave a
+  // sales enquiry unanswered while the ad that produced it kept spending.
+  if (isLeadCapture) {
+    const ctx = ctxFor(c, l.name, token);
+    const sent: string[] = [];
+    const failed: string[] = [];
+
+    if (waProblem) {
+      console.warn(`[ingest] ${l.leadId}: unreachable number ${e164} — ${waProblem}`);
+    }
+    if (e164 && !waProblem && switches.whatsapp) {
+      try {
+        await sendTemplate({
+          whatsappNumber: e164,
+          templateName: c.templates.leadFollowup,
+          parameters: waParamsFor("lead", ctx),
+        });
+        sent.push("WA-LEAD");
+      } catch (e) {
+        failed.push(failure("WA-LEAD", e));
+        console.error(`[ingest] WA-LEAD failed for ${l.leadId}:`, e);
+      }
+    }
+    if (l.email && switches.email) {
+      try {
+        const { subject, html } = emailFor("EM10", ctx);
+        await sendMail({ to: l.email, subject, html });
+        sent.push("EM-10");
+      } catch (e) {
+        failed.push(failure("EM-10", e));
+        console.error(`[ingest] EM-10 failed for ${l.leadId}:`, e);
+      }
+    }
+
+    // The qualifiers are the whole point of the ten-question form — the client
+    // accepted fewer, costlier leads to get them. Printing them here is what
+    // makes that trade pay off: whoever picks up the call list can see authority
+    // and timeline in Slack and rank the queue without opening the sheet. Each
+    // is omitted when blank rather than rendered as a dash, so an older form tab
+    // that lacks the columns produces a shorter message, not a misleading one.
+    await notifySlack(
+      `:inbox_tray: *New lead — sales enquiry* (${c.label})\n` +
+        `• ${l.name || "Unknown"}` +
+        (l.designation ? `, ${l.designation}` : "") +
+        (l.company ? ` @ ${l.company}` : "") +
+        `\n• ${e164 || "no number"} · ${l.email || "no email"}` +
+        (l.employeeCount ? `\n• Employees: ${l.employeeCount}` : "") +
+        (l.location ? `\n• ${l.location}` : "") +
+        (l.authority ? `\n• Buying role: *${l.authority}*` : "") +
+        (l.timeline ? `\n• Timeline: *${l.timeline}*` : "") +
+        (l.screeningTool ? `\n• Screening today: ${l.screeningTool}` : "") +
+        (sent.length ? `\n• Sent: ${sent.join(" + ")}` : "") +
+        (failed.length ? `\n• :warning: Failed: ${failed.join(", ")}` : "") +
+        `\n• _Sales team to review and call._`,
+    );
+    await alertOpsNewLead(c, l, e164).catch((e) =>
+      console.error(`[ingest] ops WhatsApp alert failed for ${l.leadId}:`, e),
+    );
+    return;
+  }
 
   // ── sdr_assisted: confirmation + Event Pass, right now. ──
   //
@@ -1253,6 +1493,10 @@ export async function runTick(): Promise<TickSummary> {
     const cEmp = resolveHeader(form, FORM.employeeCount);
     const cLoc = resolveHeader(form, FORM.location);
     const cYears = resolveHeader(form, FORM.years);
+    const cAuthority = resolveHeader(form, FORM.authority);
+    const cTimeline = resolveHeader(form, FORM.timeline);
+    const cScreening = resolveHeader(form, FORM.screeningTool);
+    const cAdName = resolveHeader(form, FORM.adName);
     const get = (fr: SheetRow, col: string | null) => (col ? cell(form, fr, col) : "");
 
     for (const fr of form.rows) {
@@ -1284,6 +1528,10 @@ export async function runTick(): Promise<TickSummary> {
       // Deferred, never dropped: the form row is simply left alone and ingest is
       // driven off the form tab, so the next tick after 09:00 picks it up with
       // its welcome intact.
+      // lead_capture is not deferred either, for the same reason: its
+      // acknowledgement is a receipt. Somebody who fills the form at 23:00 has
+      // just been told a salesperson will call, and hearing nothing back until
+      // 09:00 reads as a form that failed.
       if (quietNow && campaign.flow === "self_serve") {
         summary.deferredIngest++;
         continue;
@@ -1328,6 +1576,10 @@ export async function runTick(): Promise<TickSummary> {
             employeeCount: get(fr, cEmp),
             location: get(fr, cLoc),
             years: get(fr, cYears),
+            authority: get(fr, cAuthority),
+            timeline: get(fr, cTimeline),
+            screeningTool: get(fr, cScreening),
+            adName: get(fr, cAdName),
           },
           ledger,
           switches,
@@ -1419,8 +1671,24 @@ export async function runTick(): Promise<TickSummary> {
   }
 
   // 2) NURTURE (not yet registered) + REMINDERS (registered).
+  //
+  // lead_capture sends NOTHING here. Its whole campaign is the acknowledgement
+  // ingest already sent; from then on the lead belongs to a salesperson, and an
+  // automated follow-up landing in the middle of that conversation is worse than
+  // no follow-up at all.
+  //
+  // Two things already make this true by accident — its rows are stamped done so
+  // nurture skips them, and campaign.reminders is empty so dueReminders returns
+  // nothing. Neither is a guarantee anyone reading this loop can see, and both
+  // are one edit away from silently ceasing to hold. So it is said once, here.
+  // Skips the loop, NOT the rest of the tick: the delivery check and the error
+  // Slack ping below still have to run for this campaign — an acknowledgement
+  // WATI accepted and Meta then dropped is exactly the failure a sales team
+  // needs told about, and an ingest error must never go out silently.
+  const rowsToMessage = campaign.flow === "lead_capture" ? [] : auto.rows;
+
   const quiet = quietNow;
-  for (const row of auto.rows) {
+  for (const row of rowsToMessage) {
     if (outOfTime()) { summary.truncated = true; break; }
     if (!cell(auto, row, A.token)) continue;
 

@@ -85,7 +85,7 @@ it cannot live inside the tab it locates. That one stays in `SHEET_CONTROL_TAB`.
 
 | key | example | notes |
 | --- | --- | --- |
-| `flow` | `sdr_assisted` | `self_serve` or `sdr_assisted`. See below. |
+| `flow` | `sdr_assisted` | `self_serve`, `sdr_assisted` or `lead_capture`. See below. |
 | `campaign_label` | `HR Workshop — 12 Aug 2026` | shown in Slack and `/api/health` |
 | `campaign_id` | `hrw` | defaults to lowercased `reg_id_prefix` |
 | `reg_id_prefix` | `HRW` | prefix of every registration ID |
@@ -96,7 +96,15 @@ it cannot live inside the tab it locates. That one stays in `SHEET_CONTROL_TAB`.
 | `event_venue` | `901, B Wing, Prabhavee Tech Park, Baner, Pune` | |
 | `event_map_url` | `https://maps.app.goo.gl/…` | the GET DIRECTIONS button |
 | `reminder_offsets_hours` | `29,6,2` | hours **before** the start; default `29,6,2` |
-| `lead_alert_number` | `917020883237` | comma-separated; blank = no WhatsApp ping to SDRs |
+| `lead_alert_number` | `917020883237` | comma-separated; blank = no WhatsApp ping to SDRs. **Blank on CandidHR — that campaign notifies Slack only.** |
+| `demo_video_url` | `https://www.youtube.com/watch?v=QycFhOi96LA` | `lead_capture` only — the demo linked from the acknowledgement |
+
+> **`lead_capture` needs none of the `event_*` rows, `reg_id_prefix` or
+> `reminder_offsets_hours`.** It has no event. Leave them blank — filling them in
+> with a plausible-looking date is worse than leaving them empty, because
+> `event_date_short` rides into WhatsApp messages as a variable. It needs
+> `tpl_wa_lead_followup` and `demo_video_url`, and `campaignProblems()` checks
+> exactly those two.
 
 ### ⚠️ `event_start_utc` is in UTC, not IST
 
@@ -147,6 +155,7 @@ reminders move with it.
 | `tpl_wa_day_before` | WA-6 | every flow |
 | `tpl_wa_morning_of` | WA-7 | every flow |
 | `tpl_wa_two_hour` | WA-8 | every flow |
+| `tpl_wa_lead_followup` | the acknowledgement | **`lead_capture` only** |
 | `tpl_wa_lead_alert` | internal alert | every flow, if `lead_alert_number` is set |
 
 Names must match WATI **exactly**, and be APPROVED there. `necessity-check`
@@ -170,24 +179,53 @@ happened. Now the tick halts and says so in Slack instead.
 
 ## 5. `flow` — what actually changes
 
-| | `self_serve` | `sdr_assisted` |
-| --- | --- | --- |
-| registration | lead books on the landing page | **the form submission IS the registration** |
-| on ingest | WA-1 + EM-1 with a booking link | WA-5 + EM-5 confirmation + Event Pass |
-| chase ladder | WA-2/3/4 + EM-2/3/4 until they book | none — SDRs phone them |
-| `reg_id` | issued when they book | issued at ingest |
-| needs `tpl_wa_booking_pending` | **yes** | no |
+| | `self_serve` | `sdr_assisted` | `lead_capture` |
+| --- | --- | --- | --- |
+| there is an event | yes | yes | **no** |
+| registration | lead books on the landing page | **the form submission IS the registration** | nothing to register for |
+| on ingest | WA-1 + EM-1 with a booking link | WA-5 + EM-5 confirmation + Event Pass | WA + EM-10 acknowledgement with the demo |
+| chase ladder | WA-2/3/4 + EM-2/3/4 until they book | none — SDRs phone them | none — sales phone them |
+| SDR notified by | Slack + ops WhatsApp | Slack + ops WhatsApp | **Slack only** |
+| reminders | yes | yes | **none** |
+| `reg_id` | issued when they book | issued at ingest | never issued |
+| needs `tpl_wa_booking_pending` | **yes** | no | no |
 
-Setting `nurture_enabled=TRUE` on an `sdr_assisted` campaign does nothing — the
-ladder is skipped by the flow, not the switch. `necessity-check` warns, because
-a switch that reads ON while doing nothing is misleading.
+Setting `nurture_enabled=TRUE` on an `sdr_assisted` or `lead_capture` campaign
+does nothing — the ladder is skipped by the flow, not the switch.
+`necessity-check` warns, because a switch that reads ON while doing nothing is
+misleading. The same is true of `reminders_enabled` on `lead_capture`.
+
+### `lead_capture` in one paragraph
+
+The Meta form is a **sales enquiry**, not a booking. One message goes out the
+moment the lead lands — WhatsApp (`tpl_wa_lead_followup`) and EM-10, both
+carrying `demo_video_url` — the row is stamped `done` so nothing else is ever
+automated at it, and the sales team calls. It is not deferred by quiet hours:
+the acknowledgement is a receipt for something the person just submitted, and
+silence until 09:00 reads as a form that failed.
+
+**The three qualifiers.** The ten-question form exists to capture buying
+authority, timeline and current screening tool before the first call — that is
+what the lower lead volume was traded for. They land in the automation tab as
+`decision_authority`, `automation_timeline` and `current_screening_tool`, and
+they are printed in the Slack "New lead" message so the call list can be ranked
+without opening the sheet.
+
+There is no landing page on this flow, so **a column that fails to resolve means
+the answer is gone for good.** `FORM.authority` / `.timeline` / `.screeningTool`
+in `lib/booking/service.ts` list the spellings Meta may ship; if the client
+rewords a question, add the new spelling there *before* the ad goes live. Create
+the sheet with `node scripts/init-campaign-sheet.mjs <id> --flow lead_capture` so
+the three columns exist — `appendRow` refuses to write a column that is missing,
+which would fail every ingest rather than silently drop the answers.
 
 ---
 
 ## 6. Two things that stop a campaign on their own
 
-**Auto-stop at the event.** Once `now >= event_start_utc` the tick halts
-entirely — no ingest, no nurture, no reminders. Derived from the event itself so
+**Auto-stop at the event.** *(Does not apply to `lead_capture` — it has no
+event, so it has no end. It stops when somebody pauses the Meta ad.)* Once
+`now >= event_start_utc` the tick halts entirely — no ingest, no nurture, no reminders. Derived from the event itself so
 there is no flag anyone can forget. It is silent by design: this is the normal
 end of a campaign, not a fault, and it would otherwise announce itself every
 five minutes.
@@ -204,7 +242,8 @@ is worse than sending nothing. Compare with the switches, which fail open.
 **Anything `campaignProblems()` rejects** — bad `flow`, unparseable
 `event_start_utc`, blank `event_date_label` / `event_date_short` /
 `event_venue` / `reg_id_prefix`, blank `tpl_wa_confirmation`, or any blank
-template on a managed campaign — halts the tick and posts the reason to Slack.
+template on a managed campaign (on `lead_capture`: a blank
+`tpl_wa_lead_followup` or `demo_video_url`) — halts the tick and posts the reason to Slack.
 Nothing is sent. Fix the cell and the next tick resumes on its own.
 
 ---

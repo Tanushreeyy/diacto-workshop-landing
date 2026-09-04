@@ -1,0 +1,25 @@
+Template name : wa_candidhr_lead_followup
+Category      : Utility
+Language      : English (US) · en_US
+
+────────── HEADER  (type: Text) ──────────
+CANDIDHR.AI - AI-POWERED HIRING
+
+────────── BODY ──────────
+Hi {{1}}! Thanks for your interest in CandidHR.ai.
+
+We have successfully received your details. Our sales team will review your requirements and get in touch with you shortly to discuss how CandidHR.ai can support your hiring process.
+
+Here's a quick demo of how the platform works: {{2}}
+
+We look forward to connecting with you!
+
+────────── FOOTER ──────────
+CandidHR.ai by Diacto Technologies
+
+────────── VARIABLES / SAMPLE VALUES ──────────
+  {{1}} = First name           sample: Priya
+  {{2}} = Demo video link      sample: https://www.youtube.com/watch?v=QycFhOi96LA
+
+────────── BUTTONS ──────────
+[URL button · static]  Watch the demo  →  https://www.youtube.com/watch?v=QycFhOi96LA

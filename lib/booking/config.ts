@@ -43,7 +43,24 @@ export const WA_TEMPLATES = {
   WA6: opt("WATI_TPL_WA6", "wa_6_day_before"),
   WA7: opt("WATI_TPL_WA7", "wa_7_morning_of"),
   WA8: opt("WATI_TPL_WA8", "wa_two_hour"),
+  // lead_capture only. Not part of the WA-1…WA-8 ladder and deliberately not
+  // numbered into it: this campaign has no event, so there is no rung above or
+  // below it. One acknowledgement, then humans.
+  LEAD: opt("WATI_TPL_LEAD_FOLLOWUP", "wa_candidhr_lead_followup"),
 } as const;
+
+// The product demo linked from the lead_capture acknowledgement (WhatsApp {{2}}
+// and the email CTA).
+//
+// A variable, not a literal in the template, and that is the point: a
+// Meta-approved template cannot be edited in place, so a hardcoded video URL
+// would put the whole template back through review the day marketing re-cuts the
+// demo — with sends stopped until it cleared. Same lesson the hardcoded workshop
+// date taught, which is why WA-1…WA-5 had to be rebuilt as _v2.
+export const DEMO_VIDEO_URL = opt(
+  "DEMO_VIDEO_URL",
+  "https://www.youtube.com/watch?v=QycFhOi96LA",
+);
 
 // Internal ops alert. A WhatsApp template pinged to the ops number(s) in the
 // control tab (`lead_alert_number`, comma-separated) each time a new instant-form

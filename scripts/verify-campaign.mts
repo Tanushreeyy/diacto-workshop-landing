@@ -85,8 +85,22 @@ check("uses BTB templates, not the HR campaign's",
   `${fnd.templates.wa5} / ${fnd.templates.wa8}`);
 check("two-hour template is the approved v3, not the generic fallback",
   fnd.templates.wa8 === "wa_8_btb_two_hour_v3", fnd.templates.wa8);
+// A moment safely BEFORE a campaign's event, derived from the campaign itself.
+//
+// The "not ended" checks below used to call hasEnded(c) with no `now`, so they
+// asked "is this workshop over as of the instant the test runs?". That is a
+// question about the calendar, not about the code: both assertions passed while
+// the workshops were upcoming and began failing the day they happened, reporting
+// a red check for behaviour that was perfectly correct.
+//
+// Anchoring `now` to the campaign's own start keeps the assertion meaningful for
+// good, and keeps it honest if the control tab's date is ever changed.
+const beforeEvent = (c: { event: { startMs: number } }) => c.event.startMs - 86_400_000;
+const afterEvent = (c: { event: { startMs: number } }) => c.event.startMs + 86_400_000;
+
 check("validates clean", campaignProblems(fnd).length === 0, campaignProblems(fnd).join("; "));
-check("not ended", hasEnded(fnd) === false);
+check("not ended the day before it runs", hasEnded(fnd, beforeEvent(fnd)) === false);
+check("ended the day after it runs", hasEnded(fnd, afterEvent(fnd)) === true);
 
 // ── 2. Variable mapping must be unchanged by the role refactor ───────────────
 // Old logic keyed off template NAME; new logic keys off role. Same output.
@@ -121,7 +135,8 @@ check("uses HR templates, not the previous campaign's",
   hr.templates.wa5.includes("_hr_") && hr.templates.wa8.includes("_hr_"),
   `${hr.templates.wa5} / ${hr.templates.wa8}`);
 check("validates clean", campaignProblems(hr).length === 0, campaignProblems(hr).join("; "));
-check("not ended", hasEnded(hr) === false);
+check("not ended the day before it runs", hasEnded(hr, beforeEvent(hr)) === false);
+check("ended the day after it runs", hasEnded(hr, afterEvent(hr)) === true);
 
 // Reminders fire at the right IST wall-clock times.
 const ist = (iso: string) =>
@@ -144,6 +159,57 @@ check("nothing fires once the workshop has started",
 const bleed = { ...hr, templates: { ...hr.templates, wa8: "" } };
 check("blank template on managed campaign is rejected",
   campaignProblems(bleed as any).some((p) => p.includes("tpl_wa_two_hour")));
+
+// ── lead_capture — the flow with no event ───────────────────────────────────
+//
+// Built in-process rather than loaded from a sheet: these are claims about the
+// FLOW, not about anyone's control tab, and every one of them is a way this
+// campaign could fail while looking configured and healthy.
+console.log("\nLEAD_CAPTURE (CandidHR) — no event, one acknowledgement");
+const lead: any = {
+  ...hr,
+  flow: "lead_capture",
+  label: "CandidHR Lead Gen",
+  reminders: [],
+  demoVideoUrl: "https://www.youtube.com/watch?v=QycFhOi96LA",
+  templates: { ...hr.templates, leadFollowup: "wa_candidhr_lead_followup" },
+};
+
+// The one that would have bitten hardest. A lead_capture sheet leaves
+// event_start_utc blank, so it inherits a workshop date that has already passed
+// — and the auto-stop is SILENT, so the campaign would ingest nothing, say
+// nothing, and look fine.
+// Checked at a moment well past the inherited date, not at "now" — otherwise
+// this passes for the wrong reason on any day the inherited date is still in
+// the future, and only starts testing anything once it has gone by.
+check("never auto-stops, despite inheriting a past event date",
+  hasEnded(lead, afterEvent(lead)) === false, `startUtc ${lead.event.startUtc}`);
+
+check("valid with a template and a demo link", campaignProblems(lead).length === 0,
+  campaignProblems(lead).join(" | "));
+
+// Event fields are meaningless here and must not be demanded. Blanking all of
+// them is exactly what a real lead_capture control tab looks like.
+const noEvent = { ...lead, event: { ...lead.event, dateShort: "", dateLabel: "", venue: "", regIdPrefix: "", startUtc: "", startMs: NaN } };
+check("blank event fields are not an error on this flow",
+  campaignProblems(noEvent).length === 0, campaignProblems(noEvent).join(" | "));
+
+// …but its own two requirements are.
+check("blank tpl_wa_lead_followup is rejected",
+  campaignProblems({ ...lead, templates: { ...lead.templates, leadFollowup: "" } })
+    .some((p) => p.includes("tpl_wa_lead_followup")));
+check("blank demo_video_url is rejected",
+  campaignProblems({ ...lead, demoVideoUrl: "" }).some((p) => p.includes("demo_video_url")));
+
+// {{1}} name · {{2}} demo link. No date, no pass — the two things a workshop
+// template carries and this one must not.
+const leadParams = waParamsFor("lead", { ...ctx, demoVideoUrl: lead.demoVideoUrl } as any);
+check("WA params are name + demo link",
+  leadParams.length === 2 &&
+  leadParams[0].value === "Priya" &&
+  leadParams[1].value === lead.demoVideoUrl,
+  leadParams.map((p: any) => `${p.name}=${p.value}`).join(" "));
+check("no reminders are ever due", dueReminders("", lead.reminders, NaN).length === 0);
 
 console.log(`\n${failures ? `✗ ${failures} CHECK(S) FAILED` : "✓ all checks passed"}\n`);
 process.exit(failures ? 1 : 0);
