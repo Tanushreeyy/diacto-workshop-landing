@@ -25,6 +25,7 @@
 // re-run after more leads arrive backfills only the gap.
 
 import { readFileSync } from "fs";
+import crypto from "crypto";
 import { JWT } from "google-auth-library";
 
 const args = process.argv.slice(2);
@@ -108,6 +109,15 @@ const col = (header, cands) => {
   return -1;
 };
 
+// Same shape ingestLead() issues. A backfilled row must be INDISTINGUISHABLE
+// from an ingested one, and the token is not decorative: preflight treats "most
+// rows have no confirm_token" as evidence the column shifted and HALTS the whole
+// tick — which is exactly what it did on the first run here, refusing to send
+// anything against a sheet it could no longer trust. Correct behaviour, wrong
+// data. lead_capture never uses the token (no pass, no registration link), but
+// the row still has to look like the real thing.
+const genToken = () => crypto.randomBytes(18).toString("base64url");
+
 const form = await read(formTab);
 const auto = await read(autoTab);
 if (!auto.header.length) {
@@ -126,6 +136,35 @@ const missing = ["id", "name", "phone", "email", "company", "authority", "timeli
   .filter((k) => idx[k] < 0);
 if (missing.length) {
   console.warn(`! form columns not resolved (will be blank): ${missing.join(", ")}`);
+}
+
+// Repair pass, before anything else: fill a blank confirm_token on rows already
+// present. Re-running this script is how a half-finished backfill gets finished,
+// so it has to fix its own earlier output, not just skip past it.
+const aToken = col(auto.header, [A.token]);
+if (aToken >= 0) {
+  const colLetter = (n) => {
+    let s = "";
+    for (n += 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+    return s;
+  };
+  const fixes = [];
+  auto.rows.forEach((r, i) => {
+    if (!r.some((c) => String(c ?? "").trim())) return;
+    if (String(r[aToken] ?? "").trim()) return;
+    fixes.push({ range: `${autoTab}!${colLetter(aToken)}${i + 2}`, values: [[genToken()]] });
+    r[aToken] = "filled";
+  });
+  if (fixes.length) {
+    console.log(`repairing ${fixes.length} row(s) with a blank confirm_token`);
+    if (!dry) {
+      await jwt.request({
+        url: `${API}/${sheetId}/values:batchUpdate`,
+        method: "POST",
+        data: { valueInputOption: "RAW", data: fixes },
+      });
+    }
+  }
 }
 
 const aLead = col(auto.header, [A.leadId]);
@@ -180,6 +219,7 @@ for (const row of form.rows) {
     [A.phone]: phone,
     [A.phoneKey]: pk,
     [A.email]: email,
+    [A.token]: genToken(),
     [A.done]: "TRUE",
     [A.promoToday]: "0",
     [A.promoDay]: istDay,
