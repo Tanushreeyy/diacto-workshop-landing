@@ -1,11 +1,13 @@
 import type { LandingEvent } from "@/lib/landingEvent";
 import Header from "@/components/hr/ui/Header";
 import Hero from "@/components/hr/sections/Hero";
+import Speaker from "@/components/hr/sections/Speaker";
 import PainPoints from "@/components/hr/sections/PainPoints";
 import Learnings from "@/components/hr/sections/Learnings";
+import ProofStrip from "@/components/hr/sections/ProofStrip";
 import WhyAttend from "@/components/hr/sections/WhyAttend";
 import ForWho from "@/components/hr/sections/ForWho";
-import Organiser from "@/components/hr/sections/Organiser";
+import AboutSpeaker from "@/components/hr/sections/AboutSpeaker";
 import FinalCTA from "@/components/hr/sections/FinalCTA";
 import Footer from "@/components/hr/sections/Footer";
 import StickyCTA from "@/components/hr/ui/StickyCTA";
@@ -38,26 +40,33 @@ export default function HrPage({ ev }: { ev: LandingEvent }) {
         {/* 1  Hero — the audience is the dominant visual element */}
         <Hero ev={ev} />
 
-        {/* 2  PainPoints — the hiring problems HR leaders recognise */}
+        {/* 2  Speaker — a live session is sold on who is running it, so the
+               name lands before the problem does */}
+        <Speaker />
+
+        {/* 3  PainPoints — the hiring problems HR leaders and founders recognise */}
         <PainPoints />
 
-        {/* 3  Learnings — the four modules plus the AI module */}
+        {/* 4  Learnings — the four takeaways */}
         <Learnings />
 
-        {/* 4  WhyAttend — the value of showing up */}
+        {/* 5  ProofStrip — CandidHR's numbers, evidence for the promise above */}
+        <ProofStrip />
+
+        {/* 6  WhyAttend — the value of showing up */}
         <WhyAttend />
 
-        {/* 5  ForWho (+ NotFor) — who this workshop is / isn't for */}
+        {/* 7  ForWho (+ NotFor) — who this masterclass is / isn't for */}
         <ForWho />
 
-        {/* 6  Organiser — who runs it */}
-        <Organiser />
+        {/* 8  AboutSpeaker — the long-form bio */}
+        <AboutSpeaker />
 
-        {/* 7  FinalCTA — closing booking call-to-action */}
+        {/* 9  FinalCTA — closing booking call-to-action */}
         <FinalCTA ev={ev} />
       </main>
 
-      {/* 8  Footer — dark band */}
+      {/* 10  Footer — dark band */}
       <Footer ev={ev} />
 
       {/* Mobile sticky booking bar — appears after the hero scrolls away. */}

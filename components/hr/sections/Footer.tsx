@@ -28,6 +28,25 @@ export default function Footer({ ev }: { ev: LandingEvent }) {
           {ev.dayLabel} · {ev.timeLabel} · {ev.venue}
         </p>
 
+        {/* Where to reach us when someone would rather not use the form. */}
+        <p className="font-sans text-xs text-white/60">
+          <a
+            href={EVENT.productSiteUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-4 transition-colors hover:text-brand-gold"
+          >
+            {EVENT.productSite}
+          </a>
+          <span aria-hidden="true"> · </span>
+          <a
+            href={`tel:+91${EVENT.contactPhone}`}
+            className="underline underline-offset-4 transition-colors hover:text-brand-gold"
+          >
+            {EVENT.contactPhone}
+          </a>
+        </p>
+
         <a
           href={EVENT.privacyPolicyUrl}
           target="_blank"
@@ -38,7 +57,7 @@ export default function Footer({ ev }: { ev: LandingEvent }) {
         </a>
 
         <p className="mt-1 font-sans text-xs text-white/40">
-          Diacto © 2026 All Rights Reserved
+          © 2026 All Rights Reserved
         </p>
       </div>
     </footer>

@@ -40,11 +40,11 @@ const META: Record<string, (d: string) => Metadata> = {
       `Achieve 10X business growth in just 1 year. ${d}, 3–6 PM, Baner, Pune. Limited seats.`,
   }),
   hr: (d) => ({
-    title: `FREE Workshop for HR Leaders | CandidHR by Diacto | ${d}, Pune`,
+    title: `FREE Live Masterclass for HR Leaders & Founders | The Future of Hiring with AI | CandidHR by Diacto | ${d}`,
     description:
-      `A free practical workshop for HR Managers, TA Heads & CHROs. Master hiring, training, retention ` +
-      `and performance management — build high-performance teams with AI. ${d} · 3–6 PM · Baner, Pune. ` +
-      `30 seats only, free to attend.`,
+      `A free live masterclass for founders, CEOs, HR Managers, TA Heads & CHROs. Discover how AI is ` +
+      `transforming recruitment, improving quality of hire and building future-ready teams. ${d} · ` +
+      `3:00 PM to 5:00 PM · live online. Limited seats per session, free to attend.`,
   }),
 };
 

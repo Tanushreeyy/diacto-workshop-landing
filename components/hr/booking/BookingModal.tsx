@@ -508,20 +508,19 @@ function StepThree({ onClose }: { onClose: () => void }) {
         id="booking-title"
         className="mt-3 font-serif text-2xl font-bold text-brand-charcoal"
       >
-        You&apos;re In!
+        You&apos;re registered!
       </h2>
       <span
         className="mx-auto mt-3 block h-[3px] w-16 rounded-full bg-brand-gold"
         aria-hidden="true"
       />
 
+      {/* No date in here. It said "see you on 12th August" — a literal that
+          outlived its workshop by a month, on the one screen a lead reads
+          immediately after handing over their number. */}
       <p className="mt-5 font-sans text-base leading-relaxed text-brand-grey">
-        Our team will call you to confirm your seat. Your workshop pass will
-        arrive on WhatsApp &amp; email shortly.
-      </p>
-
-      <p className="mt-4 font-sans text-base font-medium leading-relaxed text-brand-charcoal">
-        Keep an eye on your WhatsApp — see you on 12th August!
+        Your joining link will arrive on WhatsApp and email before the session.
+        See you at 3 PM!
       </p>
 
       <Button

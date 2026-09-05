@@ -2,11 +2,12 @@ import SectionHeading from "@/components/hr/ui/SectionHeading";
 import Reveal from "@/components/ui/Reveal";
 
 const FOR = [
+  "Founders",
+  "CEOs",
+  "Managing Directors",
   "HR Managers",
   "TA Heads",
-  "HR Business Partners",
   "CHROs",
-  "HR Directors",
 ];
 
 const NOT_FOR = ["Students", "Freshers", "Job seekers"];

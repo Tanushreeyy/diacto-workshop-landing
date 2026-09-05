@@ -4,13 +4,13 @@ import Reveal from "@/components/ui/Reveal";
 type Reason = { text: string; icon: ReactNode };
 
 const REASONS: Reason[] = [
+  { text: "Live and interactive, not a recording", icon: <LiveIcon /> },
   {
-    text: "Practical frameworks you can implement immediately",
+    text: "Practical frameworks you can apply the same week",
     icon: <FrameworkIcon />,
   },
-  { text: "Learn from industry experts", icon: <ExpertIcon /> },
   {
-    text: "Interactive session — bring your toughest hiring challenge",
+    text: "Direct Q&A with the Founder & CEO",
     icon: <InteractiveIcon />,
   },
 ];
@@ -58,7 +58,7 @@ export default function WhyAttend() {
             below the row so it reads as a statement, not a fourth item. */}
         <Reveal delay={350}>
           <p className="mx-auto mt-10 inline-flex rounded-full border border-brand-gold/50 bg-brand-gold/10 px-7 py-3 font-serif text-xl font-semibold text-brand-gold md:mt-12 md:text-2xl">
-            100% FREE — No fees. Just value.
+            100% FREE. No fees. Just value.
           </p>
         </Reveal>
       </div>
@@ -94,13 +94,14 @@ function FrameworkIcon() {
   );
 }
 
-/* Industry experts — a person with a star. */
-function ExpertIcon() {
+/* Live, not a recording — a broadcasting screen. */
+function LiveIcon() {
   return (
     <svg {...iconProps}>
-      <circle cx="10" cy="8" r="3.25" />
-      <path d="M4 20a6 6 0 0 1 12 0" />
-      <path d="m18.5 3.5.95 1.95 2.05.3-1.5 1.45.35 2.05-1.85-.97-1.85.97.35-2.05-1.5-1.45 2.05-.3.95-1.95Z" />
+      <rect x="2.5" y="5" width="19" height="12.5" rx="2" />
+      <path d="M8.5 21h7M12 17.5V21" />
+      <circle cx="12" cy="11.25" r="1.75" />
+      <path d="M8.4 8.4a4 4 0 0 0 0 5.7M15.6 8.4a4 4 0 0 1 0 5.7" />
     </svg>
   );
 }

@@ -114,6 +114,11 @@ export function isValidPhone(raw: string): boolean {
  *   +9170574671102  -> 11-digit subscriber number
  * The old 10-to-15-digit check passed both, because the stray digits kept the
  * total inside the range.
+ *
+ * Contrast +9109007062702, a real CandidHR lead: that one is 91 followed by the
+ * trunk 0, so cleanPhoneDigits recovers 919007062702 and it passes. The rule is
+ * the same in both directions — strip a redundant prefix, never guess which of
+ * too many digits to drop.
  */
 export function phoneProblem(raw: string): string | null {
   // Judge the number we would actually send to, not the one that was typed —

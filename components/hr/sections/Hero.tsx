@@ -67,10 +67,6 @@ export default function Hero({ ev }: { ev: LandingEvent }) {
             display size. The gold now lands on the ampersand alone, which keeps
             the brand accent without costing legibility.
 
-            Cased literally rather than with `uppercase` — the trailing "s" in
-            CHROs is a plural, not part of the acronym, and a CSS transform
-            would turn it into CHROS.
-
             Sized with clamp() rather than breakpoints so the audience block
             scales continuously and never overflows a narrow phone (which would
             give the whole page a horizontal scrollbar).
@@ -79,11 +75,9 @@ export default function Hero({ ev }: { ev: LandingEvent }) {
             id="hero-heading"
             className="mt-4 font-serif text-[clamp(2rem,min(10.5vw,9vh),7rem)] font-extrabold leading-[0.92] tracking-tight text-brand-cream sm:mt-5"
           >
-            HR MANAGERS,
+            HR LEADERS
             <br />
-            TA HEADS <span className="text-brand-gold">&amp;</span>
-            <br />
-            CHROs
+            <span className="text-brand-gold">&amp;</span> FOUNDERS
           </h1>
         </Reveal>
 
@@ -96,13 +90,19 @@ export default function Hero({ ev }: { ev: LandingEvent }) {
         </Reveal>
 
         <Reveal delay={200}>
+          {/* The masterclass title leads in cream at full strength; the promise
+              that follows sits back at white/70. One paragraph, two weights —
+              the visitor reads the subject before the sales line. */}
           <p className="mt-5 max-w-2xl font-sans text-base leading-relaxed text-white/70 sm:mt-7 sm:text-lg">
+            <span className="font-semibold text-brand-cream">
+              {EVENT.title}
+            </span>{" "}
             {EVENT.subheadline}
           </p>
         </Reveal>
 
         <Reveal delay={250} className="w-full">
-          <EventChips ev={ev} className="mt-6 sm:mt-8" />
+          <EventChips ev={ev} showDuration className="mt-6 sm:mt-8" />
         </Reveal>
 
         <Reveal delay={300}>

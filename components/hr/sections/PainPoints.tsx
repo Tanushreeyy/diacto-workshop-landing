@@ -11,16 +11,16 @@ const PAIN_POINTS: PainPoint[] = [
     text: "Wrong hires cost time, money and momentum",
     icon: <UserXIcon />,
   },
-  { text: "Best employees leave within a year", icon: <ExitDoorIcon /> },
+  {
+    text: "Screening hundreds of resumes manually",
+    icon: <ResumeStackIcon />,
+  },
   {
     text: "Interviews run on gut feeling, not data",
     icon: <ClipboardQuestionIcon />,
   },
-  {
-    text: "Underperformers are hard to manage professionally",
-    icon: <TrendingDownIcon />,
-  },
-  { text: "Recruitment isn't leveraging AI yet", icon: <AiChipIcon /> },
+  { text: "Best employees leave within a year", icon: <ExitDoorIcon /> },
+  { text: "Recruitment still is not leveraging AI", icon: <AiChipIcon /> },
 ];
 
 export default function PainPoints() {
@@ -30,7 +30,7 @@ export default function PainPoints() {
         <Reveal>
           <SectionHeading
             overline="SOUND FAMILIAR?"
-            title="Is Your Hiring Slowing You Down?"
+            title="Is Hiring Slowing Your Business Down?"
             showDot={false}
           />
         </Reveal>
@@ -122,12 +122,15 @@ function ClipboardQuestionIcon() {
   );
 }
 
-/* Underperformers — downward trend line. */
-function TrendingDownIcon() {
+/* Screening resumes by hand — a stack of documents under a magnifier. */
+function ResumeStackIcon() {
   return (
     <svg {...iconProps}>
-      <path d="M22 17 13.5 8.5 8.5 13.5 2 7" />
-      <path d="M16 17h6v-6" />
+      <path d="M7 3h6.5L17 6.5V15a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 6 15V4.5A1.5 1.5 0 0 1 7.5 3Z" />
+      <path d="M13 3v4h4" />
+      <path d="M4 7v12.5A1.5 1.5 0 0 0 5.5 21H14" />
+      <circle cx="15.5" cy="17.5" r="3" />
+      <path d="m17.8 19.8 2.2 2.2" />
     </svg>
   );
 }

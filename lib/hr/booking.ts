@@ -4,10 +4,13 @@
 // defined by LeadPayload below and documented in README.md. Keep the two in
 // sync — the backend team codes against the README.
 
+// Grouped rather than one title per option, because the masterclass now speaks
+// to two audiences at once: the founder who owns the hiring problem and the HR
+// leader who runs it. Three options keep the select short while still sorting
+// every lead into the bucket the SDR list is worked from.
 export const DESIGNATIONS = [
-  "HR Manager",
-  "Talent Acquisition (TA) Head",
-  "CHRO",
+  "CEO / Founder / Managing Director",
+  "HR Manager / TA Head / CHRO",
   "Others",
 ] as const;
 

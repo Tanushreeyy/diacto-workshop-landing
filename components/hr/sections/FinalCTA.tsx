@@ -2,6 +2,7 @@ import type { LandingEvent } from "@/lib/landingEvent";
 import BookButton from "@/components/hr/ui/BookButton";
 import Reveal from "@/components/ui/Reveal";
 import EventChips from "@/components/hr/ui/EventChips";
+import { EVENT } from "@/lib/hr/event";
 
 export default function FinalCTA({ ev }: { ev: LandingEvent }) {
   return (
@@ -27,14 +28,14 @@ export default function FinalCTA({ ev }: { ev: LandingEvent }) {
             id="finalcta-heading"
             className="font-serif text-3xl font-bold leading-tight text-brand-white md:text-4xl"
           >
-            Ready to Reserve Your Seat?
+            Ready to See the Future of Hiring?
           </h2>
         </Reveal>
 
         <Reveal delay={100}>
           <p className="mx-auto mt-5 max-w-2xl font-sans text-base leading-relaxed text-white/80 md:text-lg">
-            Only 30 seats per session. Submit the form and your workshop pass
-            arrives on WhatsApp &amp; email.
+            Sessions run Monday to Friday, 3 to 5 PM, live online. Register and
+            your joining link arrives on WhatsApp and email.
           </p>
         </Reveal>
 
@@ -46,7 +47,10 @@ export default function FinalCTA({ ev }: { ev: LandingEvent }) {
         </Reveal>
 
         <Reveal delay={300}>
-          <EventChips ev={ev} className="mt-10" />
+          {/* The recurring schedule, not the next single date: this band closes
+              on "there is a session every weekday", where the hero opens on the
+              one the visitor is booking. */}
+          <EventChips ev={ev} day={EVENT.recurrenceLabel} className="mt-10" />
         </Reveal>
       </div>
     </section>
